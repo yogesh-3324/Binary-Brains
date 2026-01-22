@@ -1,0 +1,13 @@
+torch
+torchvision
+numpy
+scikit-learn
+Pillow
+imagehash
+tqdm
+matplotlib
+fastapi
+uvicorn
+python-multipart
+numpy
+pillow
