@@ -18,8 +18,6 @@ def cropfinds(path1,path2):
 # Check image loading
     if img_orig is None or img_crop is None:
       return False
-    img_orig = cv2.resize(img_orig, (800, 800))
-    img_crop = cv2.resize(img_crop, (800, 800))
 
     gray1 = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
     gray2 = cv2.cvtColor(img_crop, cv2.COLOR_BGR2GRAY)
@@ -45,8 +43,6 @@ def cropfinds(path1,path2):
 # Lowe ratio test
     good = []
     for pair in matches:
-        if len(pair) != 2:
-            continue
         m, n = pair
         if m.distance < 0.75 * n.distance:
             good.append(m)
@@ -67,7 +63,7 @@ def cropfinds(path1,path2):
 
 # Inlier check
     inliers = int(np.sum(mask))
-    if inliers < 15:
+    if inliers < 8:
         return False
 
 # ✅ VALID CROP
@@ -214,8 +210,8 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
     # ----------------------------
 
     # Thresholds (Grayscale should give high similarity for color-shifted duplicates)
-    EXACT_MATCH_THR = 0.96
-    NEAR_DUP_THR = 0.9
+    EXACT_MATCH_THR = 0.98
+    NEAR_DUP_THR = 0.89
 
     def classify_score(s):
         if s >= EXACT_MATCH_THR: return "Exactly Same"
@@ -254,7 +250,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
                 score =float(np.dot(qv, stored_vector.T))
                 if score > best_score:
                     best_score = score
-            if(best_score>=.96):
+            if(best_score>=.97):
                 return [{
                 "name": os.path.basename(image_files[idx]),
                 "score": round(best_score, 4),
@@ -302,21 +298,36 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
             "score": round(score, 4),
             "status": classify_score(score)
         })
+    print(maxi)    
     if(maxi<0.9):
-        count=0
         for idx,score in sorted_matches:
             path1=image_files[idx]
             path2=query_image_path
+            if(score<0.4):
+                continue
             res=cropfinds(path1,path2)
+            print(res)
+            if 0.6 <= score < 0.96:
+               status = "Near Duplicate"
+            elif score < 0.6:
+               status = "This might match your image"
+            else:
+               status = "Exactly Same"
+            print(res)   
+
+            if(score>=0.4 and score<0.6):
+                score=0.8
+            elif(score>=0.6 and score<0.8):
+                score=0.85
+            elif(score>=0.8):
+                score=0.96        
             if(res):
                 return[{
                 "name": os.path.basename(image_files[idx]),
-                "score": round(.9, 4),
-                "status": "Cropped Version"
+                "score": round(score, 4),
+                "status": status
                 }]
-            count+=1
-            if(count==10):
-                break
+            
     
     return results[:5]
 

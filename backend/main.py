@@ -234,5 +234,68 @@ def remove_image_from_index(filename, store_dir="dinov2_faiss_store"):
         print(f"❌ Error updating index: {e}")
         return False
 
+def add_image_to_index(image_path, store_dir="dinov2_faiss_store"):
+    print(f"➕ Adding new image to index: {image_path}")
+
+    path_vectors = os.path.join(store_dir, "image_vectors.npy")
+    path_paths   = os.path.join(store_dir, "image_paths.npy")
+    path_hashes  = os.path.join(store_dir, "image_hashes.npy")
+    path_index   = os.path.join(store_dir, "dinov2.index")
+
+    # Safety check
+    if not os.path.exists(image_path):
+        print("❌ Image does not exist.")
+        return False
+
+    # Load existing data
+    if not (os.path.exists(path_vectors) and os.path.exists(path_paths) and os.path.exists(path_hashes)):
+        print("❌ Index not found. Run process_reference_pool() first.")
+        return False
+
+    vectors = np.load(path_vectors, allow_pickle=True)
+    paths   = np.load(path_paths, allow_pickle=True)
+    hashes  = np.load(path_hashes, allow_pickle=True)
+
+    # Avoid duplicates
+    if image_path in paths:
+        print("⚠️ Image already exists in index.")
+        return False
+
+    # Embed image
+    new_vector = embed_images_batch(
+        [image_path],
+        MODEL,
+        TRANSFORM,
+        DEVICE,
+        batch_size=1
+    )
+
+    if new_vector.size == 0:
+        print("❌ Failed to embed image.")
+        return False
+
+    # Compute pHash
+    new_hash = compute_phash(image_path)
+
+    # Append to numpy stores
+    vectors = np.vstack((vectors, new_vector))
+    paths   = np.append(paths, image_path)
+    hashes  = np.append(hashes, new_hash)
+
+    # Update FAISS index (fast append)
+    d = vectors.shape[1]
+    index = faiss.read_index(path_index)
+    index.add(new_vector)
+
+    # Save everything
+    faiss.write_index(index, path_index)
+    np.save(path_vectors, vectors)
+    np.save(path_paths, paths)
+    np.save(path_hashes, hashes)
+
+    print("✅ Image added successfully.")
+    return True
+
+
 if __name__ == "__main__":
     process_reference_pool("uploads/pool")

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 # --- IMPORT YOUR ML MODULES ---
 # We import the smart incremental function and the fast delete function
-from main import process_reference_pool, remove_image_from_index
+from main import process_reference_pool, remove_image_from_index,add_image_to_index
 from imageHash import find_similar_images
 
 app = FastAPI()
@@ -36,33 +36,83 @@ app.mount("/images", StaticFiles(directory="uploads"), name="images")
 # ---------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------
-
 @app.post("/reset")
 def reset_backend():
-    """Clears all images on startup or refresh"""
-    # clear pool
-    for f in glob.glob(os.path.join(POOL_DIR, "*")): 
-        try: os.remove(f)
-        except: pass
-    # clear query
-    for f in glob.glob(os.path.join(QUERY_DIR, "*")): 
-        try: os.remove(f)
-        except: pass
-    return {"status": "cleared"}
+    """Clears all images AND FAISS index (full reset)"""
 
+    # -----------------------------
+    # 1. Clear pool images
+    # -----------------------------
+    for f in glob.glob(os.path.join(POOL_DIR, "*")):
+        try:
+            os.remove(f)
+        except:
+            pass
+
+    # -----------------------------
+    # 2. Clear query images
+    # -----------------------------
+    for f in glob.glob(os.path.join(QUERY_DIR, "*")):
+        try:
+            os.remove(f)
+        except:
+            pass
+
+    # -----------------------------
+    # 3. Clear FAISS index + metadata
+    # -----------------------------
+    FAISS_DIR = "dinov2_faiss_store"
+    faiss_files = [
+        "dinov2.index",
+        "image_vectors.npy",
+        "image_paths.npy",
+        "image_hashes.npy",
+    ]
+
+    for fname in faiss_files:
+        path = os.path.join(FAISS_DIR, fname)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except:
+                pass
+
+    return {
+        "status": "fully_reset",
+        "pool_cleared": True,
+        "query_cleared": True,
+        "faiss_cleared": True
+    }
 @app.post("/upload/pool")
 async def upload_pool(files: List[UploadFile] = File(...)):
-    """Appends new images to the pool folder"""
+    """Appends new images to the pool folder AND index instantly"""
     saved_files = []
+    indexed_files = []
+
     for file in files:
         file_path = os.path.join(POOL_DIR, file.filename)
-        # Only save if it doesn't exist to avoid duplicates
+
+        # Save only if not already present
         if not os.path.exists(file_path):
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
+
             saved_files.append(file.filename)
-            
-    return {"added": saved_files, "count": len(saved_files)}
+            if not os.path.exists("dinov2_faiss_store/dinov2.index"):
+                process_reference_pool(POOL_DIR)
+
+
+            # 🚀 INSTANT INDEX UPDATE
+            added = add_image_to_index(file_path)
+            if added:
+                indexed_files.append(file.filename)
+
+    return {
+        "added_to_disk": saved_files,
+        "added_to_index": indexed_files,
+        "count": len(saved_files)
+    }
+
 
 @app.delete("/delete/pool/{filename}")
 def delete_pool_image(filename: str):

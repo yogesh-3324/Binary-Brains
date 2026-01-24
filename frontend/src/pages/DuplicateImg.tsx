@@ -41,8 +41,10 @@ const DuplicateImg = () => {
   const [queryImage, setQueryImage] = useState<ImagePreview | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isanalyzed, setIsanalyzed] = useState(false);
   const [selectedLightboxImage, setSelectedLightboxImage] = useState<ImagePreview | null>(null);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [uploaded,setUploaded]=useState(false);
   
   const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -60,7 +62,9 @@ const DuplicateImg = () => {
   // 2. HELPER: Upload Pool Images Immediately
   const uploadPoolImagesToBackend = async (files: File[]) => {
     const formData = new FormData();
+    setUploaded(false);
     files.forEach(f => formData.append("files", f));
+
     try {
       await fetch("http://localhost:8000/upload/pool", {
         method: "POST",
@@ -68,6 +72,10 @@ const DuplicateImg = () => {
       });
     } catch (err) {
       console.error("Upload error:", err);
+    }
+    finally{
+      console.log("Uploaded pool images to backend");
+      setUploaded(true);
     }
   };
 
@@ -158,6 +166,7 @@ const DuplicateImg = () => {
     }
 
     setIsAnalyzing(true);
+    setIsanalyzed(true);
     setResults([]); 
 
     try {
@@ -195,7 +204,7 @@ const DuplicateImg = () => {
       {/* HEADER */}
       <header className="bg-gradient-to-br from-blue-600 to-blue-800 text-white pt-16 pb-20 px-4 text-center shadow-lg">
         <h1 className="text-4xl font-extrabold tracking-tight">Near Duplicate Image Detector</h1>
-        <p className="mt-3 text-lg opacity-90 font-normal">Perceptual Hashing + DINOv2 + FAISS</p>
+        <p className="mt-3 text-lg opacity-90 font-normal">Smart Ai search</p>
       </header>
 
       {/* MAIN CONTENT */}
@@ -271,7 +280,7 @@ const DuplicateImg = () => {
             <h2 className="text-xl font-bold text-gray-900">2. Query Image</h2>
           </div>
 
-          {!queryImage ? (
+          {/* {!queryImage && uploaded ? (
             <div className="flex-1 min-h-[320px] border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center cursor-pointer relative hover:border-blue-500 hover:bg-blue-50 transition-colors bg-slate-50">
               <input
                 type="file" accept="image/*"
@@ -281,7 +290,7 @@ const DuplicateImg = () => {
               <UploadIcon />
               <div className="text-slate-600 text-base mt-3"><strong>Select image</strong> to check</div>
             </div>
-          ) : (
+          ) : queryImage&&(
             <div className="flex-1 flex flex-col">
               <div className="relative group w-full h-[250px] mt-4 bg-slate-100 rounded-lg border border-slate-200">
                  <img
@@ -304,7 +313,77 @@ const DuplicateImg = () => {
                 Remove & Change
               </button>
             </div>
-          )}
+          ): !queryImage && !uploaded &&(
+            <div className="flex-1 min-h-[320px] border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center cursor-pointer relative hover:border-blue-500 hover:bg-blue-50 transition-colors bg-slate-50">
+              <loading className="animate-spin w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full mb-4"></loading>
+              <div className="text-slate-600 text-base mt-3"><strong>Upload reference images first</strong> to enable query upload</div>
+            </div>
+          )} */}
+          {
+  !uploaded && poolImages.length==0 ? (
+    // 🔒 Reference images NOT uploaded
+    <div className="flex-1 min-h-[320px] border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center bg-slate-50">
+      <div className="animate-spin w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
+      <div className="text-slate-600 text-base mt-3">
+        <strong>Upload reference images first</strong> to enable query upload
+      </div>
+    </div>
+  ) :!uploaded?(
+    <div className="flex-1 min-h-[320px] border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center bg-slate-50">
+      <div className="animate-spin w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
+      <div className="text-slate-600 text-base mt-3">
+        <strong>Training Pool images</strong> to enable query upload
+      </div>
+    </div>
+
+  ):
+  !queryImage ? (
+    // 📤 Upload query image
+    <div className="flex-1 min-h-[320px] border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center cursor-pointer relative hover:border-blue-500 hover:bg-blue-50 transition-colors bg-slate-50">
+      <input
+        type="file"
+        accept="image/*"
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+        onChange={handleQueryUpload}
+      />
+      <UploadIcon />
+      <div className="text-slate-600 text-base mt-3">
+        <strong>Select image</strong> to check
+      </div>
+    </div>
+  ) : (
+    // 🖼️ Query image preview
+    <div className="flex-1 flex flex-col">
+      <div className="relative group w-full h-[250px] mt-4 bg-slate-100 rounded-lg border border-slate-200">
+        <img
+          src={queryImage.preview}
+          alt="Query"
+          className="w-full h-full object-contain rounded-lg cursor-pointer"
+          onClick={() => setSelectedLightboxImage(queryImage)}
+        />
+
+        <button
+          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation();
+            removeQueryImage();
+          }}
+          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-all duration-200 transform hover:scale-110 z-20"
+          title="Remove image"
+        >
+          <TrashIcon />
+        </button>
+      </div>
+
+      <button
+        className="text-blue-600 text-sm mt-2 underline hover:text-blue-800"
+        onClick={removeQueryImage}
+      >
+        Remove & Change
+      </button>
+    </div>
+  )
+}
+
 
           <button
             className={`w-full mt-6 py-4 rounded-xl text-white text-base font-semibold shadow-md transition-colors ${
@@ -313,7 +392,7 @@ const DuplicateImg = () => {
             onClick={checkDuplicate}
             disabled={isAnalyzing}
           >
-            {isAnalyzing ? "Analyzing..." : "Analyze Similarity"}
+            {isAnalyzing ? "Analyzing...": "Analyze Similarity"}
           </button>
         </section>
       </main>
@@ -327,7 +406,6 @@ const DuplicateImg = () => {
             const borderClass = r.score > 0.9 ? "border-l-green-600" : r.score > 0.8 ? "border-l-amber-500" : "border-l-slate-400";
             const bgClass = r.score > 0.9 ? "bg-green-600" : r.score > 0.8 ? "bg-amber-500" : "bg-slate-400";
             const badgeBg = r.score > 0.9 ? "bg-green-600/10" : r.score > 0.8 ? "bg-amber-500/10" : "bg-slate-400/10";
-
             return (
               <div key={i} className={`bg-white rounded-xl p-5 mb-4 flex items-center justify-between border-l-[5px] shadow-sm ${borderClass}`}>
                 <div className="flex items-center gap-4">
@@ -344,16 +422,25 @@ const DuplicateImg = () => {
                   </div>
                 </div>
                 <div className="text-right w-28">
-                  <span className={`font-bold text-lg ${colorClass}`}>{(r.score * 100).toFixed(0)}%</span>
-                  <div className="w-full h-1.5 bg-slate-200 rounded-full mt-1.5 overflow-hidden">
+                  {/* <span className={`font-bold text-lg ${colorClass}`}>{(r.score * 100).toFixed(0)}%</span> */}
+                  {/* <div className="w-full h-1.5 bg-slate-200 rounded-full mt-1.5 overflow-hidden">
                     <div className={`h-full rounded-full ${bgClass}`} style={{ width: `${r.score * 100}%` }}></div>
-                  </div>
+                  </div> */}
                 </div>
               </div>
             );
           })}
+         
         </section>
       )}
+      {
+        results.length === 0 && !isAnalyzing && isanalyzed &&(
+          <section className="w-full max-w-6xl mx-auto px-5 mb-12">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">Analysis Results</h2>
+            <p className="text-slate-500">No matching image Found</p>
+          </section>
+        )
+      }
 
       {/* FOOTER */}
       <footer className="mt-auto text-center py-8 text-slate-400 border-t border-slate-200 bg-slate-50">

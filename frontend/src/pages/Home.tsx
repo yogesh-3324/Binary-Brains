@@ -72,14 +72,14 @@ export default function Home() {
           </div>
 
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-slate-900 mb-8 leading-tight">
-            Clean your dataset <br className="hidden md:block" />
+            Find Near Duplicate image<br className="hidden md:block" />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">
               in seconds, not hours.
             </span>
           </h1>
 
           <p className="text-lg md:text-xl text-slate-500 max-w-2xl mx-auto mb-12 leading-relaxed">
-            Advanced Perceptual Hashing and AI Vector comparison to identify exact matches and near-duplicates instantly.
+            Advanced Similarity Search
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -116,7 +116,7 @@ export default function Home() {
 
           {/* Description */}
           <p className="text-lg md:text-xl text-slate-500 max-w-2xl mx-auto mb-12 leading-relaxed">
-            Upload a short video fragment or user-generated clip, and our AI will locate the exact timestamp and original master file in your video library.
+            Upload a short video fragment or user-generated clip, and our AI will locate the exact  original master file in your video library.
           </p>
 
           {/* Button */}
