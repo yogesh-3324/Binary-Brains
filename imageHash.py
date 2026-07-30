@@ -183,7 +183,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
 
 
     # Thresholds (Grayscale should give high similarity for color-shifted duplicates)
-    EXACT_MATCH_THR = 0.97
+    EXACT_MATCH_THR = 0.98
     NEAR_DUP_THR = 0.89
 
     def classify_score(s):
@@ -222,13 +222,13 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
                 score = float(np.dot(qv, stored_vector.T).item())
                 if score > best_score:
                     best_score = score
-            if(best_score>=.95):
+            if(best_score>=.97):
                 return [{
                 "name": os.path.basename(image_files[idx]),
                 "score": round(best_score, 4),
                 "status": "Exactly Same"
                        }]
-            elif(best_score>=.65):
+            elif(best_score>=.7):
                 return [{
                 "name": os.path.basename(image_files[idx]),
                 "score": round(.9, 4),
@@ -258,7 +258,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
     sorted_matches = sorted(final_results_map.items(), key=lambda x: -x[1])
     maxi=0
     for idx, score in sorted_matches:
-        if score < 0.50: 
+        if score < 0.60: 
             continue
         maxi=max(maxi,score)
 
@@ -268,7 +268,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
             "status": classify_score(score)
         })
     print(maxi)    
-    if(maxi<0.88):
+    if(maxi<0.9):
         for idx,score in sorted_matches:
             path1=image_files[idx]
             path2=query_image_path

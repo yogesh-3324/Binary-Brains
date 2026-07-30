@@ -8,6 +8,7 @@ tqdm
 matplotlib
 fastapi
 uvicorn
+gunicorn
 python-multipart
-numpy
-pillow
+faiss-cpu
+opencv-python-headless

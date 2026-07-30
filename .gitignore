@@ -1,37 +1,41 @@
-# ======================
 # OS / Editor files
-# ======================
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
-# ======================
-# FRONTEND (Vite + React)
-# ======================
+# Node / React
+node_modules/
+dist/
 frontend/node_modules/
 frontend/dist/
 frontend/.env
 frontend/.env.local
+frontend/.env.production.local
 
-# ======================
-# BACKEND (Python)
-# ======================
+# Python Environments & Cache
 venv/
+.venv/
+backend/venv/
+backend2/venv/
 .env
 __pycache__/
 *.pyc
 
-# ======================
-# ML / FAISS / STORAGE
-# ======================
+# ML / FAISS / Local Upload Storage & Test Data
 clip_faiss_store/
 dinov2_faiss_store/
+dinov2_video_store/
+backend/dinov2_faiss_store/
+backend2/dinov2_video_store/
 uploads/
+backend/uploads/
+backend2/uploads/
+test_images/
+*.index
+*.npy
 
-# ======================
 # Logs & temp
-# ======================
 *.log
 tmp/
 temp/

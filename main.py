@@ -1,59 +1,49 @@
-import sys
-import os
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
 import torch
 import numpy as np
 import faiss
 import glob
+import os
 import concurrent.futures
 from PIL import Image
 import torchvision.transforms as T
 import imagehash
 
 # ----------------------------
-# DINOv2 SETUP (LAZY CACHED)
+# DINOv2 SETUP
 # ----------------------------
-_DINO_MODEL = None
-_DINO_TRANSFORM = None
-_DINO_DEVICE = None
 
-def get_dino_tools(model_name="dinov2_vits14"):
-    global _DINO_MODEL, _DINO_TRANSFORM, _DINO_DEVICE
-    if _DINO_MODEL is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"⚡ Loading Fast DINOv2 ({model_name}) on {device}...")
-        model = torch.hub.load("facebookresearch/dinov2", model_name)
-        model = model.to(device).eval()
+def get_dino_tools(model_name="dinov2_vitb14"):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
 
-        transform = T.Compose([
-            T.Resize((224, 224)),
-            T.Grayscale(num_output_channels=3),
-            T.ToTensor(),
-            T.Normalize(
-                mean=(0.485, 0.456, 0.406),
-                std=(0.229, 0.224, 0.225)
-            ),
-        ])
-        _DINO_MODEL = model
-        _DINO_TRANSFORM = transform
-        _DINO_DEVICE = device
-        print("✅ DINOv2 Loaded Successfully")
-    return _DINO_MODEL, _DINO_TRANSFORM, _DINO_DEVICE
+    model = torch.hub.load("facebookresearch/dinov2", model_name)
+    model = model.to(device)
+    model.eval()
+
+    # TRANSFORM: GRAYSCALE (Color Blind Mode)
+    transform = T.Compose([
+        T.Resize((224, 224)),
+        T.Grayscale(num_output_channels=3),
+        T.ToTensor(),
+        T.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225)
+        ),
+    ])
+
+    return model, transform, device
+
+# --- LOAD MODEL GLOBALLY ---
+print("⏳ Loading DINOv2 Model... (This may take a moment)")
+MODEL, TRANSFORM, DEVICE = get_dino_tools()
+print("✅ Model Loaded Successfully")
 
 
 # ----------------------------
 # OPTIMIZED EMBEDDING FUNCTION (BATCH)
 # ----------------------------
 
-def embed_images_batch(image_paths, model=None, transform=None, device=None, batch_size=32):
-    if model is None or transform is None or device is None:
-        model, transform, device = get_dino_tools()
-        
+def embed_images_batch(image_paths, model, transform, device, batch_size=32):
     embeddings = []
     total = len(image_paths)
 
@@ -74,7 +64,7 @@ def embed_images_batch(image_paths, model=None, transform=None, device=None, bat
 
         batch_stack = torch.stack(batch_tensors).to(device)
 
-        with torch.inference_mode():
+        with torch.no_grad():
             features = model(batch_stack)
             features = torch.nn.functional.normalize(features, dim=-1)
             embeddings.append(features.cpu().numpy())
@@ -129,7 +119,7 @@ def process_reference_pool(folder_path):
     path_index = os.path.join(save_dir, "dinov2.index")
 
     # 3. Load Existing Data (if available)
-    old_vectors = np.empty((0, 384), dtype="float32") # 384 is DINOv2-ViT-S dimension
+    old_vectors = np.empty((0, 768), dtype="float32") # 768 is DINOv2-ViT-B dimension
     old_paths = np.array([])
     old_hashes = np.array([])
     
@@ -153,8 +143,7 @@ def process_reference_pool(folder_path):
     print(f"🚀 Found {len(files_to_process)} NEW images to process...")
 
     # 5. Process ONLY the new files
-    model, transform, device = get_dino_tools()
-    new_vectors = embed_images_batch(files_to_process, model, transform, device, batch_size=32)
+    new_vectors = embed_images_batch(files_to_process, MODEL, TRANSFORM, DEVICE, batch_size=32)
 
     if new_vectors.size == 0 and len(files_to_process) > 0:
          return {"status": "error", "message": "Failed to embed new images"}
@@ -275,6 +264,9 @@ def add_image_to_index(image_path, store_dir="dinov2_faiss_store"):
     # Embed image
     new_vector = embed_images_batch(
         [image_path],
+        MODEL,
+        TRANSFORM,
+        DEVICE,
         batch_size=1
     )
 

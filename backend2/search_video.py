@@ -1,130 +1,157 @@
 # search_video.py
+import sys
+import os
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import torch
 import numpy as np
 import faiss
-import os
+from collections import defaultdict
 from PIL import Image
-from utils import get_dino_tools, get_clip_tools, extract_frames
+from utils import get_dino_tools, extract_frames_with_timestamps
 
 # =====================================================
 # CONFIG
 # =====================================================
 SAMPLE_FPS = 1
-TOP_K = 2  # How many candidates to verify with CLIP
+FRAME_SIM_THRESHOLD = 0.50  # Minimum frame cosine similarity
+MATCH_SCORE_THRESHOLD = 0.45 # Minimum confidence score for candidate clip match
+TOP_K_FRAME_NEIGHBORS = 5
 
-# Thresholds for CLIP Verification
-HIGH_RATIO = 0.85     # Very confident match
-MID_RATIO = 0.70      # Likely match
-
-# =====================================================
-# CLIP EMBEDDING HELPER
-# =====================================================
-def clip_video_embedding(video_path, model, processor, device, fps=1):
-    """
-    Generates a single vector for a video using CLIP.
-    """
-    frames = extract_frames(video_path, fps)
-    if not frames: return None
-    
-    images = [Image.fromarray(f) for f in frames]
-    
-    # Tokenize/Process images
-    inputs = processor(images=images, return_tensors="pt", padding=True).to(device)
-
-    with torch.no_grad():
-        feats = model.get_image_features(**inputs)
-        feats = torch.nn.functional.normalize(feats, dim=-1)
-
-    # Average frames and normalize result
-    embed = feats.mean(dim=0)
-    embed = embed / embed.norm() 
-    return embed.cpu().numpy()
+def format_time(seconds: float) -> str:
+    secs = max(0, int(round(seconds)))
+    mins = secs // 60
+    rem_secs = secs % 60
+    return f"{mins:02d}:{rem_secs:02d}"
 
 # =====================================================
-# MAIN SEARCH LOGIC
+# SUB-CLIP TEMPORAL ALIGNMENT SEARCH LOGIC
 # =====================================================
 def find_similar_videos(query_path: str, store_dir: str):
     index_path = os.path.join(store_dir, "videos.index")
     paths_path = os.path.join(store_dir, "video_paths.npy")
+    meta_path = os.path.join(store_dir, "frame_meta.npy")
 
-    if not os.path.exists(index_path):
+    if not (os.path.exists(index_path) and os.path.exists(paths_path) and os.path.exists(meta_path)):
+        print("⚠️ Store files missing in search_video.")
         return []
-    
-    # Load Index
+
     index = faiss.read_index(index_path)
     video_paths = np.load(paths_path, allow_pickle=True)
+    frame_meta = np.load(meta_path, allow_pickle=True)
 
-    if index.ntotal == 0:
+    if index.ntotal == 0 or len(frame_meta) == 0:
         return []
 
-    # 1. Load All Models (Cached via utils)
+    # 1. Extract Query Frames & Timestamps (1 frame every 1.5 seconds)
+    query_items = extract_frames_with_timestamps(query_path, sample_interval_sec=1.5)
+    if not query_items:
+        return []
+
     dino_model, dino_transform, dino_device = get_dino_tools()
-    clip_model, clip_processor, clip_device = get_clip_tools()
 
-    # 2. --- STEP A: COARSE SEARCH (DINOv2) ---
-    query_frames = extract_frames(query_path, fps=SAMPLE_FPS)
-    if not query_frames:
-        return []
-
-    # Embed Query Frames (DINO)
-    tensors = [dino_transform(Image.fromarray(f)) for f in query_frames]
+    frames = [it["frame"] for it in query_items]
+    tensors = [dino_transform(Image.fromarray(f)) for f in frames]
     x = torch.stack(tensors).to(dino_device)
-    
-    with torch.no_grad():
-        f = dino_model(x)
-        f = torch.nn.functional.normalize(f, dim=-1)
-    
-    # Average & Normalize (Must match main.py logic)
-    query_dino_embed = f.cpu().numpy()
-    query_global = np.mean(query_dino_embed, axis=0).reshape(1, -1)
-    faiss.normalize_L2(query_global) 
 
-    # Search in FAISS
-    k = min(TOP_K, index.ntotal)
-    distances, indices = index.search(query_global, k)
+    with torch.inference_mode():
+        feats = dino_model(x)
+        feats = torch.nn.functional.normalize(feats, dim=-1)
 
-    # 3. --- STEP B: FINE VERIFICATION (CLIP) ---
-    
-    # Calculate CLIP embedding for Query Video ONCE
-    query_clip_embed = clip_video_embedding(
-        query_path, clip_model, clip_processor, clip_device, fps=SAMPLE_FPS
-    )
-    
-    results = []
-    
-    for rank in range(k):
-        idx = indices[0][rank]
-        if idx == -1: continue 
-        
-        candidate_path = video_paths[idx]
-        
-        # Calculate CLIP embedding for Candidate Video
-        # (In production, you might want to cache these too, but calculating on fly is safer for now)
-        candidate_clip = clip_video_embedding(
-            candidate_path, clip_model, clip_processor, clip_device, fps=SAMPLE_FPS
-        )
+    query_embeds = feats.cpu().numpy().astype("float32")
+    num_query_frames = len(query_embeds)
 
-        if candidate_clip is None:
+    # 2. FAISS Frame Search (Query each query frame against indexed reference frames)
+    k_neighbors = min(TOP_K_FRAME_NEIGHBORS, index.ntotal)
+    distances, indices = index.search(query_embeds, k_neighbors)
+
+    # 3. Collect Frame Matches grouped by candidate reference video
+    # Structure: video_matches[video_path] = list of {"q_ts", "ref_ts", "score", "offset"}
+    video_matches = defaultdict(list)
+
+    for q_idx in range(num_query_frames):
+        q_ts = query_items[q_idx]["timestamp"]
+
+        for neighbor_idx in range(k_neighbors):
+            vec_idx = indices[q_idx][neighbor_idx]
+            if vec_idx == -1:
+                continue
+
+            score = float(distances[q_idx][neighbor_idx])
+            if score < FRAME_SIM_THRESHOLD:
+                continue
+
+            meta = frame_meta[vec_idx]
+            ref_path = meta["video"]
+            ref_ts = meta["timestamp"]
+            offset = round(ref_ts - q_ts, 1)
+
+            video_matches[ref_path].append({
+                "q_ts": q_ts,
+                "ref_ts": ref_ts,
+                "score": score,
+                "offset": offset
+            })
+
+    # 4. Temporal Offset Consensus Clustering per candidate video
+    candidate_results = []
+
+    for ref_path, matches in video_matches.items():
+        if not matches:
             continue
 
-        # Cosine Similarity
-        score = float(np.dot(query_clip_embed, candidate_clip))
+        # Bin offsets by 1.5 second tolerance windows to find the largest aligned cluster
+        offset_clusters = defaultdict(list)
+        for m in matches:
+            # Round offset to nearest 1.5s bin
+            bin_key = round(m["offset"] / 1.5) * 1.5
+            offset_clusters[bin_key].append(m)
 
-        # Verdict Logic
-        if score >= HIGH_RATIO:
-            verdict = "FOUND"
-        elif score >= MID_RATIO:
-            verdict = "POSSIBLE"
-        else:
-            verdict = "NOT_PRESENT"
+        # Pick the cluster with highest match count & cumulative score
+        best_cluster = max(
+            offset_clusters.values(),
+            key=lambda cluster: (len({m["q_ts"] for m in cluster}), sum(m["score"] for m in cluster))
+        )
 
-        results.append({
-            "rank": int(rank + 1),
-            "video": os.path.basename(candidate_path),
-            "path": candidate_path,
-            "clip_score": round(score, 4),
-            "confidence": f"{score * 100:.2f}%",
+        # Unique query frames matched in best cluster
+        unique_q_matched = len({m["q_ts"] for m in best_cluster})
+        avg_cluster_score = sum(m["score"] for m in best_cluster) / len(best_cluster)
+        
+        # Coverage ratio of the query clip
+        coverage = unique_q_matched / num_query_frames
+
+        # Weighted final score combining frame cosine similarity and temporal clip coverage
+        final_score = (0.6 * avg_cluster_score) + (0.4 * coverage)
+
+        if final_score < MATCH_SCORE_THRESHOLD:
+            continue
+
+        ref_timestamps = [m["ref_ts"] for m in best_cluster]
+        start_ts = min(ref_timestamps)
+        end_ts = max(ref_timestamps)
+        ts_range_str = f"{format_time(start_ts)} - {format_time(end_ts)}"
+
+        verdict = "ORIGINAL SOURCE MATCH" if final_score >= 0.70 else "SUB-CLIP MATCH"
+
+        candidate_results.append({
+            "video": os.path.basename(ref_path),
+            "path": ref_path,
+            "dino_score": round(final_score, 4),
+            "confidence": f"{min(100.0, final_score * 100):.2f}%",
+            "matched_frames": f"{unique_q_matched} / {num_query_frames} frames",
+            "timestamp_range": ts_range_str,
             "verdict": verdict
         })
 
-    return results
+    # 5. Sort by final score descending
+    candidate_results.sort(key=lambda x: x["dino_score"], reverse=True)
+
+    for rank, res in enumerate(candidate_results[:5], 1):
+        res["rank"] = rank
+
+    return candidate_results[:5]
+

@@ -1,5 +1,12 @@
 # server.py
+import sys
 import os
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import shutil
 import glob
 import stat
@@ -19,7 +26,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -197,5 +204,6 @@ async def trigger_analysis():
 # =====================================================
 if __name__ == "__main__":
     import uvicorn
-    # Added workers=1 to prevent multiprocess file lock issues
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", 8001))
+    uvicorn.run(app, host=host, port=port)

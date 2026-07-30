@@ -6,3 +6,10 @@ Pillow
 imagehash
 tqdm
 matplotlib
+fastapi
+uvicorn
+gunicorn
+python-multipart
+faiss-cpu
+opencv-python-headless
+transformers

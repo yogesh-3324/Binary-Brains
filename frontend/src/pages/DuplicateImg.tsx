@@ -36,6 +36,9 @@ const BackIcon = () => (
 );
 
 // ---------------- COMPONENT ----------------
+// ---------------- CONFIG ----------------
+const API_BASE = import.meta.env.VITE_IMAGE_API_URL || "http://localhost:8000";
+
 const DuplicateImg = () => {
   const [poolImages, setPoolImages] = useState<ImagePreview[]>([]);
   const [queryImage, setQueryImage] = useState<ImagePreview | null>(null);
@@ -44,13 +47,13 @@ const DuplicateImg = () => {
   const [isanalyzed, setIsanalyzed] = useState(false);
   const [selectedLightboxImage, setSelectedLightboxImage] = useState<ImagePreview | null>(null);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
-  const [uploaded,setUploaded]=useState(false);
-  
+  const [uploaded, setUploaded] = useState(false);
+
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   // 1. ON MOUNT: Clean the backend so it matches our empty state
   useEffect(() => {
-    fetch("http://localhost:8000/reset", { method: "POST" })
+    fetch(`${API_BASE}/reset`, { method: "POST" })
       .catch(err => console.error("Failed to reset backend:", err));
 
     return () => {
@@ -402,10 +405,9 @@ const DuplicateImg = () => {
         <section className="w-full max-w-6xl mx-auto px-5 mb-12">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Analysis Results</h2>
           {results.map((r, i) => {
-            const colorClass = r.score > 0.9 ? "text-green-600" : r.score > 0.8 ? "text-amber-500" : "text-slate-400";
-            const borderClass = r.score > 0.9 ? "border-l-green-600" : r.score > 0.8 ? "border-l-amber-500" : "border-l-slate-400";
-            const bgClass = r.score > 0.9 ? "bg-green-600" : r.score > 0.8 ? "bg-amber-500" : "bg-slate-400";
-            const badgeBg = r.score > 0.9 ? "bg-green-600/10" : r.score > 0.8 ? "bg-amber-500/10" : "bg-slate-400/10";
+            const colorClass = r.score > 0.8 ? "text-green-600" : r.score > 0.6 ? "text-amber-500" : "text-slate-400";
+            const borderClass = r.score > 0.8 ? "border-l-green-600" : r.score > 0.6 ? "border-l-amber-500" : "border-l-slate-400";
+            const badgeBg = r.score > 0.8 ? "bg-green-600/10" : r.score > 0.6 ? "bg-amber-500/10" : "bg-slate-400/10";
             return (
               <div key={i} className={`bg-white rounded-xl p-5 mb-4 flex items-center justify-between border-l-[5px] shadow-sm ${borderClass}`}>
                 <div className="flex items-center gap-4">

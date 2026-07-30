@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  backend-image:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: binary_brains_image_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/dinov2_faiss_store:/app/dinov2_faiss_store
+    restart: unless-stopped
+
+  backend-video:
+    build:
+      context: ./backend2
+      dockerfile: Dockerfile
+    container_name: binary_brains_video_backend
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend2/uploads:/app/uploads
+      - ./backend2/dinov2_video_store:/app/dinov2_video_store
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_IMAGE_API_URL: http://localhost:8000
+        VITE_VIDEO_API_URL: http://localhost:8001
+    container_name: binary_brains_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend-image
+      - backend-video
+    restart: unless-stopped
