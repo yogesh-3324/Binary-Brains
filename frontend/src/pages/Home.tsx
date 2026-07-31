@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { LogoBrand } from '../components/Logo';
 
 // --- Icons for the Feature Section ---
 const RocketIcon = () => (
@@ -49,12 +50,7 @@ export default function Home() {
       {/* --- NAVBAR --- */}
       <nav className="w-full border-b border-slate-100 bg-white/80 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xl">D</span>
-            </div>
-            <span className="text-xl font-bold text-slate-900 tracking-tight">DuplicateDetector</span>
-          </div>
+          <LogoBrand />
         </div>
       </nav>
 
@@ -201,8 +197,8 @@ export default function Home() {
       <section className="bg-slate-50 py-24 border-t border-slate-200">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-slate-900">Why use DuplicateDetector?</h2>
-            <p className="text-slate-500 mt-4">Powerful features built for data scientists and photographers.</p>
+            <h2 className="text-3xl font-bold text-slate-900">Why use SameShot?</h2>
+            <p className="text-slate-500 mt-4">Powerful features built for content creators, data scientists, and platforms.</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
@@ -245,7 +241,7 @@ export default function Home() {
       {/* --- FOOTER --- */}
       <footer className="bg-white py-12 border-t border-slate-200">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between text-slate-400 text-sm">
-          <p>© 2024 Duplicate Image Detection System. All rights reserved.</p>
+          <p>© 2026 SameShot - Visual Duplicate & Sub-Clip Detection System. All rights reserved.</p>
           <div className="flex gap-6 mt-4 md:mt-0">
             <a href="#" className="hover:text-slate-600">Privacy</a>
             <a href="#" className="hover:text-slate-600">Terms</a>

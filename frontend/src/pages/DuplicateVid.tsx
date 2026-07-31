@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { LogoBrand } from "../components/Logo";
 
 // ---------------- CONFIG ----------------
 const API_BASE = import.meta.env.VITE_VIDEO_API_URL || "http://localhost:8001";
@@ -233,8 +234,12 @@ const DuplicateVid = () => {
               <Icons.Back />
             </Link>
             <div className="h-6 w-px bg-slate-200" />
-            <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
-              Edited Video Clip Search
+            <Link to="/">
+              <LogoBrand textClassName="text-lg font-bold tracking-tight text-slate-900" />
+            </Link>
+            <span className="text-slate-300">|</span>
+            <h1 className="text-sm font-semibold text-slate-600 hidden sm:block">
+              Sub-Clip Video Search
             </h1>
           </div>
           <button 

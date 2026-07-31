@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
+import { LogoBrand } from "../components/Logo";
 
 // ---------------- TYPES ----------------
 type Result = {
@@ -205,9 +207,14 @@ const DuplicateImg = () => {
       <style>{`::-webkit-scrollbar { display: none; } html, body { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
 
       {/* HEADER */}
-      <header className="bg-gradient-to-br from-blue-600 to-blue-800 text-white pt-16 pb-20 px-4 text-center shadow-lg">
-        <h1 className="text-4xl font-extrabold tracking-tight">Near Duplicate Image Detector</h1>
-        <p className="mt-3 text-lg opacity-90 font-normal">Smart Ai search</p>
+      <header className="bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-800 text-white pt-12 pb-20 px-4 shadow-lg relative">
+        <div className="max-w-6xl mx-auto flex flex-col items-center text-center">
+          <Link to="/" className="mb-3 hover:opacity-95 transition">
+            <LogoBrand textClassName="text-2xl font-bold tracking-tight text-white" lightMode={true} />
+          </Link>
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Near Duplicate Image Search</h1>
+          <p className="mt-2 text-base opacity-90 font-normal">Powered by DINOv2 Vision Transformers and FAISS Vector Search</p>
+        </div>
       </header>
 
       {/* MAIN CONTENT */}
