@@ -107,11 +107,8 @@ def embed_query_with_rotations(image_path, model, transform, device):
             # expand=True ensures we don't crop corners when rotating
             rotated = image.rotate(angle, expand=True)
             
-            # Resize BEFORE transform to keep consistent logic
-            rotated_resized = rotated.resize((500, 500)) 
-            
-            # Transform (includes Grayscale conversion)
-            img_tensor = transform(rotated_resized).unsqueeze(0).to(device)
+            # Transform (includes Grayscale conversion and 224x224 resize)
+            img_tensor = transform(rotated).unsqueeze(0).to(device)
 
             with torch.no_grad():
                 features = model(img_tensor)
@@ -152,13 +149,14 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
     if not os.path.exists(query_image_path):
         return {"error": "Query image not found."}
 
+    if index.ntotal == 0 or len(image_files) == 0:
+        return []
 
     query_hash = compute_phash(query_image_path)
     if query_hash is None:
         return {"error": "Failed to compute pHash."}
 
     # GENERATE 4 VECTORS (Original + 3 Rotations)
-    # These will be Grayscale thanks to the transform
     query_vectors = embed_query_with_rotations(
         query_image_path, MODEL, TRANSFORM, DEVICE
     )
@@ -166,9 +164,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
     if query_vectors.size == 0:
         return {"error": "Failed to process query image embeddings."}
 
-  
-
-    HASH_THRESHOLD = 8
+    HASH_THRESHOLD = 12
     candidate_indices = []
 
     for i, h in enumerate(image_hashes):
@@ -181,10 +177,8 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
 
     print(f"Hash candidates found: {len(candidate_indices)}")
 
-
-    # Thresholds (Grayscale should give high similarity for color-shifted duplicates)
-    EXACT_MATCH_THR = 0.97
-    NEAR_DUP_THR = 0.89
+    EXACT_MATCH_THR = 0.95
+    NEAR_DUP_THR = 0.70
 
     def classify_score(s):
         if s >= EXACT_MATCH_THR: return "Exactly Same"
@@ -194,7 +188,6 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
     final_results_map = {} 
 
     def search_vectors(search_index, search_k, id_map_func):
-        # Check all 4 query rotations against the index
         for qv in query_vectors:
             dists, idxs = search_index.search(qv.reshape(1, -1), search_k)
             
@@ -205,7 +198,6 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
                 real_idx = id_map_func(found_idx)
                 score = float(dists[0][rank])
                 
-                # Update if this rotation gave a better score for this image
                 if real_idx in final_results_map:
                     if score > final_results_map[real_idx]:
                         final_results_map[real_idx] = score
@@ -213,29 +205,6 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
                     final_results_map[real_idx] = score
 
     if candidate_indices:
-        # SEARCH SUBSET (Hash Candidates)
-        if(len(candidate_indices)==1):
-            idx = candidate_indices[0]
-            stored_vector = index.reconstruct(int(idx)).reshape(1, -1)
-            best_score = 0.0
-            for qv in query_vectors:
-                score = float(np.dot(qv, stored_vector.T).item())
-                if score > best_score:
-                    best_score = score
-            if(best_score>=.95):
-                return [{
-                "name": os.path.basename(image_files[idx]),
-                "score": round(best_score, 4),
-                "status": "Exactly Same"
-                       }]
-            elif(best_score>=.65):
-                return [{
-                "name": os.path.basename(image_files[idx]),
-                "score": round(.9, 4),
-                "status": "Near Duplicate"
-                       }]
-
-        
         print("Searching within hash-filtered candidates")
         candidate_vectors = np.array([index.reconstruct(int(i)) for i in candidate_indices])
         
@@ -245,13 +214,12 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
         k = min(5, len(candidate_indices))
         id_mapper = lambda temp_id: candidate_indices[temp_id]
         search_vectors(temp_index, k, id_mapper)
-
     else:
-        # SEARCH ALL (Fallback)
         print("No hash matches found, doing full FAISS search")
-        k = 5
+        k = min(5, index.ntotal)
         id_mapper = lambda real_id: real_id
         search_vectors(index, k, id_mapper)
+
 
   
     results = []

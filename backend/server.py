@@ -92,33 +92,25 @@ def reset_backend():
     }
 @app.post("/upload/pool")
 async def upload_pool(files: List[UploadFile] = File(...)):
-    """Appends new images to the pool folder AND index instantly"""
+    """Saves uploaded images to the pool folder and updates the FAISS index."""
     saved_files = []
-    indexed_files = []
 
     for file in files:
         file_path = os.path.join(POOL_DIR, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        saved_files.append(file.filename)
+        await file.close()
 
-        # Save only if not already present
-        if not os.path.exists(file_path):
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-
-            saved_files.append(file.filename)
-            if not os.path.exists("dinov2_faiss_store/dinov2.index"):
-                process_reference_pool(POOL_DIR)
-
-
-            # INSTANT INDEX UPDATE
-            added = add_image_to_index(file_path)
-            if added:
-                indexed_files.append(file.filename)
+    # Incrementally embed any new reference pool images into FAISS
+    status = process_reference_pool(POOL_DIR)
 
     return {
-        "added_to_disk": saved_files,
-        "added_to_index": indexed_files,
-        "count": len(saved_files)
+        "added": saved_files,
+        "count": len(saved_files),
+        "status": status
     }
+
 
 
 @app.delete("/delete/pool/{filename}")
