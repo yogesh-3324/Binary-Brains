@@ -7,6 +7,9 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import torch
+# Restrict CPU threads to prevent memory spikes on 512MB RAM instances
+torch.set_num_threads(1)
+
 import numpy as np
 import faiss
 import glob
@@ -50,7 +53,7 @@ def get_dino_tools(model_name="dinov2_vits14"):
 # OPTIMIZED EMBEDDING FUNCTION (BATCH)
 # ----------------------------
 
-def embed_images_batch(image_paths, model=None, transform=None, device=None, batch_size=32):
+def embed_images_batch(image_paths, model=None, transform=None, device=None, batch_size=16):
     if model is None or transform is None or device is None:
         model, transform, device = get_dino_tools()
         

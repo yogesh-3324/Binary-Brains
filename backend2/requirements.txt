@@ -1,5 +1,3 @@
-torch
-torchvision
 numpy
 scikit-learn
 Pillow
@@ -12,4 +10,3 @@ gunicorn
 python-multipart
 faiss-cpu
 opencv-python-headless
-transformers
