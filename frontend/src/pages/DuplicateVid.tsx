@@ -100,10 +100,19 @@ const DuplicateVid = () => {
     };
   }, []);
 
+  const isVideoFile = (file: File) => {
+    if (file.type && file.type.startsWith("video/")) return true;
+    const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+    return [".mp4", ".avi", ".mov", ".mkv", ".webm"].includes(ext);
+  };
+
   // 2. HANDLERS
   const processFiles = async (files: File[]) => {
-    const validFiles = files.filter(f => f.type.startsWith("video/"));
-    if (!validFiles.length) return;
+    const validFiles = files.filter(isVideoFile);
+    if (!validFiles.length) {
+      setError("Please select valid video files (.mp4, .mov, .avi, .mkv, .webm).");
+      return;
+    }
 
     setIsUploading(true);
     setError(null);
@@ -111,8 +120,12 @@ const DuplicateVid = () => {
       const fd = new FormData();
       validFiles.forEach(f => fd.append("files", f));
       
+      console.log("Uploading reference videos to:", `${API_BASE}/upload/pool`);
       const res = await fetch(`${API_BASE}/upload/pool`, { method: "POST", body: fd });
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
+      }
 
       const newVideos = validFiles.map(f => ({
         id: Math.random().toString(36).substr(2, 9),
@@ -122,8 +135,9 @@ const DuplicateVid = () => {
       }));
 
       setPoolVideos(prev => [...prev, ...newVideos]);
-    } catch (err) {
-      setError("Failed to upload reference videos.");
+    } catch (err: any) {
+      console.error("Pool upload error:", err);
+      setError(err?.message || "Failed to upload reference videos.");
     } finally {
       setIsUploading(false);
     }
@@ -151,13 +165,24 @@ const DuplicateVid = () => {
     if (!e.target.files?.[0]) return;
     const file = e.target.files[0];
     
+    if (!isVideoFile(file)) {
+      setError("Selected query file is not a supported video format.");
+      return;
+    }
+
     if (queryVideo) URL.revokeObjectURL(queryVideo.preview);
     setResults([]); 
+    setError(null);
 
     try {
       const fd = new FormData();
       fd.append("file", file);
-      await fetch(`${API_BASE}/upload/query`, { method: "POST", body: fd });
+      console.log("Uploading query video to:", `${API_BASE}/upload/query`);
+      const res = await fetch(`${API_BASE}/upload/query`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
+      }
 
       setQueryVideo({
         id: "query",
@@ -165,8 +190,9 @@ const DuplicateVid = () => {
         preview: URL.createObjectURL(file),
         name: file.name,
       });
-    } catch (err) {
-      setError("Failed to upload query video.");
+    } catch (err: any) {
+      console.error("Query video upload error:", err);
+      setError(err?.message || "Failed to upload query video.");
     }
     e.target.value = "";
   };
