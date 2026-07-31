@@ -63,7 +63,7 @@ def on_rm_error(func, path, exc_info):
         os.chmod(path, stat.S_IWRITE)
         func(path)
     else:
-        print(f"⚠️ Warning: Could not delete {path}. File might be in use.")
+        print(f"Warning: Could not delete {path}. File might be in use.")
 
 # =====================================================
 # RESET (FIXED)

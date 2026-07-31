@@ -84,7 +84,7 @@ def process_reference_pool(pool_dir: str):
     for path in new_videos:
         items = extract_frames_with_timestamps(path, sample_interval_sec=SAMPLE_INTERVAL_SEC)
         if not items:
-            print(f"⚠️ Skipping {path} (No frames)")
+            print(f"Skipping {path} (No frames)")
             continue
 
         frames = [it["frame"] for it in items]

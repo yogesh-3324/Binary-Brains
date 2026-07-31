@@ -34,9 +34,9 @@ def get_dino_tools(model_name="dinov2_vits14"):
     return model, transform, device
 
 # --- LOAD MODEL GLOBALLY ---
-print("⏳ Loading DINOv2 Model... (This may take a moment)")
+print("Loading DINOv2 Model... (This may take a moment)")
 MODEL, TRANSFORM, DEVICE = get_dino_tools()
-print("✅ Model Loaded Successfully")
+print("Model Loaded Successfully")
 
 
 # ----------------------------
@@ -57,7 +57,7 @@ def embed_images_batch(image_paths, model, transform, device, batch_size=32):
                 img_tensor = transform(image)
                 batch_tensors.append(img_tensor)
             except Exception as e:
-                print(f"⚠️ Error loading {path}: {e}")
+                print(f"Error loading {path}: {e}")
 
         if not batch_tensors:
             continue
@@ -94,7 +94,7 @@ def compute_phash(image_path):
 # ----------------------------
 
 def process_reference_pool(folder_path):
-    print(f"📂 Scanning folder: {folder_path}")
+    print(f"Scanning folder: {folder_path}")
     
     # 1. Get all files currently on disk
     extensions = ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp"]
@@ -106,7 +106,7 @@ def process_reference_pool(folder_path):
     current_files = sorted(list(set(current_files)))
 
     if not current_files:
-        print(f"❌ No images found in '{folder_path}'")
+        print(f"No images found in '{folder_path}'")
         return {"status": "error", "message": "No images found"}
 
     # 2. Setup DB Paths
@@ -128,19 +128,19 @@ def process_reference_pool(folder_path):
             old_vectors = np.load(path_vectors, allow_pickle=True)
             old_paths = np.load(path_paths, allow_pickle=True)
             old_hashes = np.load(path_hashes, allow_pickle=True)
-            print(f"📚 Loaded existing index with {len(old_paths)} images.")
+            print(f"Loaded existing index with {len(old_paths)} images.")
         except Exception as e:
-            print(f"⚠️ Could not load existing index ({e}). Starting fresh.")
+            print(f"Could not load existing index ({e}). Starting fresh.")
 
     # 4. Filter: Find which files are NEW
     existing_files_set = set(old_paths)
     files_to_process = [f for f in current_files if f not in existing_files_set]
 
     if not files_to_process:
-        print("✅ Index is already up to date. No new images to add.")
+        print("Index is already up to date. No new images to add.")
         return {"status": "success", "count": len(current_files), "newly_added": 0}
 
-    print(f"🚀 Found {len(files_to_process)} NEW images to process...")
+    print(f"Found {len(files_to_process)} NEW images to process...")
 
     # 5. Process ONLY the new files
     new_vectors = embed_images_batch(files_to_process, MODEL, TRANSFORM, DEVICE, batch_size=32)
@@ -148,7 +148,7 @@ def process_reference_pool(folder_path):
     if new_vectors.size == 0 and len(files_to_process) > 0:
          return {"status": "error", "message": "Failed to embed new images"}
 
-    print("⚡ Generating hashes for new images...")
+    print("Generating hashes for new images...")
     with concurrent.futures.ThreadPoolExecutor() as executor:
         new_hashes = list(executor.map(compute_phash, files_to_process))
 
@@ -164,7 +164,7 @@ def process_reference_pool(folder_path):
         final_hashes = np.array(new_hashes)
 
     # 7. Rebuild and Save FAISS Index
-    print(f"💾 Saving updated index with {len(final_paths)} total images...")
+    print(f"Saving updated index with {len(final_paths)} total images...")
     
     d = final_vectors.shape[1]
     index = faiss.IndexFlatIP(d)
@@ -175,7 +175,7 @@ def process_reference_pool(folder_path):
     np.save(path_paths, final_paths)
     np.save(path_hashes, final_hashes)
 
-    print("✅ Index updated successfully.")
+    print("Index updated successfully.")
     
     return {
         "status": "success", 
@@ -189,7 +189,7 @@ def process_reference_pool(folder_path):
 # ----------------------------
 
 def remove_image_from_index(filename, store_dir="dinov2_faiss_store"):
-    print(f"🗑️ Attempting to remove '{filename}' from index...")
+    print(f"Attempting to remove '{filename}' from index...")
     
     path_vectors = os.path.join(store_dir, "image_vectors.npy")
     path_paths = os.path.join(store_dir, "image_paths.npy")
@@ -227,15 +227,15 @@ def remove_image_from_index(filename, store_dir="dinov2_faiss_store"):
         np.save(path_paths, new_paths)
         np.save(path_hashes, new_hashes)
 
-        print(f"✅ Successfully removed '{filename}'.")
+        print(f"Successfully removed '{filename}'.")
         return True
 
     except Exception as e:
-        print(f"❌ Error updating index: {e}")
+        print(f"Error updating index: {e}")
         return False
 
 def add_image_to_index(image_path, store_dir="dinov2_faiss_store"):
-    print(f"➕ Adding new image to index: {image_path}")
+    print(f"Adding new image to index: {image_path}")
 
     path_vectors = os.path.join(store_dir, "image_vectors.npy")
     path_paths   = os.path.join(store_dir, "image_paths.npy")
@@ -244,12 +244,12 @@ def add_image_to_index(image_path, store_dir="dinov2_faiss_store"):
 
     # Safety check
     if not os.path.exists(image_path):
-        print("❌ Image does not exist.")
+        print("Image does not exist.")
         return False
 
     # Load existing data
     if not (os.path.exists(path_vectors) and os.path.exists(path_paths) and os.path.exists(path_hashes)):
-        print("❌ Index not found. Run process_reference_pool() first.")
+        print("Index not found. Run process_reference_pool() first.")
         return False
 
     vectors = np.load(path_vectors, allow_pickle=True)
@@ -258,7 +258,7 @@ def add_image_to_index(image_path, store_dir="dinov2_faiss_store"):
 
     # Avoid duplicates
     if image_path in paths:
-        print("⚠️ Image already exists in index.")
+        print("Image already exists in index.")
         return False
 
     # Embed image
@@ -271,7 +271,7 @@ def add_image_to_index(image_path, store_dir="dinov2_faiss_store"):
     )
 
     if new_vector.size == 0:
-        print("❌ Failed to embed image.")
+        print("Failed to embed image.")
         return False
 
     # Compute pHash
@@ -293,7 +293,7 @@ def add_image_to_index(image_path, store_dir="dinov2_faiss_store"):
     np.save(path_paths, paths)
     np.save(path_hashes, hashes)
 
-    print("✅ Image added successfully.")
+    print("Image added successfully.")
     return True
 
 

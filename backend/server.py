@@ -109,7 +109,7 @@ async def upload_pool(files: List[UploadFile] = File(...)):
                 process_reference_pool(POOL_DIR)
 
 
-            # 🚀 INSTANT INDEX UPDATE
+            # INSTANT INDEX UPDATE
             added = add_image_to_index(file_path)
             if added:
                 indexed_files.append(file.filename)
@@ -198,9 +198,9 @@ def trigger_analysis():
     new_count = train_status.get("newly_added", 0)
     total_count = train_status.get("count", 0)
     if new_count > 0:
-        print(f"⚡ INCREMENTAL UPDATE: Added {new_count} new images. Total Pool: {total_count}")
+        print(f"INCREMENTAL UPDATE: Added {new_count} new images. Total Pool: {total_count}")
     else:
-        print(f"✅ Index up-to-date. Using existing {total_count} images.")
+        print(f"Index up-to-date. Using existing {total_count} images.")
 
     # 3. Search
     print(f"DEBUG: Searching for matches...")

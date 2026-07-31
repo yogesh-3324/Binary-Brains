@@ -359,7 +359,7 @@ const DuplicateVid = () => {
                         </div>
                         {r.timestamp_range && (
                           <div className="text-[11px] bg-white border border-slate-200 rounded p-2 flex justify-between items-center text-slate-600">
-                            <span>📍 Clip Range: <strong className="text-indigo-600">{r.timestamp_range}</strong></span>
+                            <span>Clip Range: <strong className="text-indigo-600">{r.timestamp_range}</strong></span>
                             {r.matched_frames && <span className="text-slate-400">{r.matched_frames}</span>}
                           </div>
                         )}

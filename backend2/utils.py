@@ -36,7 +36,7 @@ def get_dino_tools(model_name="dinov2_vits14"):
     global _DINO_MODEL, _DINO_TRANSFORM
     
     if _DINO_MODEL is None:
-        print(f"⚡ Loading Fast DINOv2 ({model_name})...")
+        print(f"Loading Fast DINOv2 ({model_name})...")
         device = get_device()
         
         # Load Model
@@ -53,7 +53,7 @@ def get_dino_tools(model_name="dinov2_vits14"):
         
         _DINO_MODEL = model
         _DINO_TRANSFORM = transform
-        print("✅ Fast DINOv2 Loaded")
+        print("Fast DINOv2 Loaded")
     
     return _DINO_MODEL, _DINO_TRANSFORM, get_device()
 

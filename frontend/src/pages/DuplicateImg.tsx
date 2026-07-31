@@ -324,7 +324,7 @@ const DuplicateImg = () => {
           )} */}
           {
   !uploaded && poolImages.length==0 ? (
-    // 🔒 Reference images NOT uploaded
+    // Reference images NOT uploaded
     <div className="flex-1 min-h-[320px] border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center bg-slate-50">
       <div className="animate-spin w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
       <div className="text-slate-600 text-base mt-3">
@@ -341,7 +341,7 @@ const DuplicateImg = () => {
 
   ):
   !queryImage ? (
-    // 📤 Upload query image
+    // Upload query image
     <div className="flex-1 min-h-[320px] border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center cursor-pointer relative hover:border-blue-500 hover:bg-blue-50 transition-colors bg-slate-50">
       <input
         type="file"
@@ -355,7 +355,7 @@ const DuplicateImg = () => {
       </div>
     </div>
   ) : (
-    // 🖼️ Query image preview
+    // Query image preview
     <div className="flex-1 flex flex-col">
       <div className="relative group w-full h-[250px] mt-4 bg-slate-100 rounded-lg border border-slate-200">
         <img

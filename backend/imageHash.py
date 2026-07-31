@@ -88,9 +88,9 @@ def get_dino_tools(model_name="dinov2_vits14"):
 
     return model, transform, device
 
-print("⏳ Loading DINOv2 Model for Search...")
+print("Loading DINOv2 Model for Search...")
 MODEL, TRANSFORM, DEVICE = get_dino_tools()
-print("✅ Search Model Loaded")
+print("Search Model Loaded")
 
 
 def embed_query_with_rotations(image_path, model, transform, device):
@@ -127,7 +127,7 @@ def embed_query_with_rotations(image_path, model, transform, device):
 
 def compute_phash(image_path):
     try:
-        # 👇 UPDATED: Convert to Grayscale ('L') before hashing
+        # UPDATED: Convert to Grayscale ('L') before hashing
         # This ensures the hash ignores color information completely
         img = Image.open(image_path).convert("L")
         return imagehash.phash(img)
@@ -157,7 +157,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
     if query_hash is None:
         return {"error": "Failed to compute pHash."}
 
-    # 🔥 GENERATE 4 VECTORS (Original + 3 Rotations)
+    # GENERATE 4 VECTORS (Original + 3 Rotations)
     # These will be Grayscale thanks to the transform
     query_vectors = embed_query_with_rotations(
         query_image_path, MODEL, TRANSFORM, DEVICE
@@ -179,7 +179,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
         except:
             continue
 
-    print(f"⚡ Hash candidates found: {len(candidate_indices)}")
+    print(f"Hash candidates found: {len(candidate_indices)}")
 
 
     # Thresholds (Grayscale should give high similarity for color-shifted duplicates)
@@ -236,7 +236,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
                        }]
 
         
-        print("🔎 Searching within hash-filtered candidates")
+        print("Searching within hash-filtered candidates")
         candidate_vectors = np.array([index.reconstruct(int(i)) for i in candidate_indices])
         
         temp_index = faiss.IndexFlatIP(candidate_vectors.shape[1])
@@ -248,7 +248,7 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
 
     else:
         # SEARCH ALL (Fallback)
-        print("⚠ No hash matches found, doing full FAISS search")
+        print("No hash matches found, doing full FAISS search")
         k = 5
         id_mapper = lambda real_id: real_id
         search_vectors(index, k, id_mapper)

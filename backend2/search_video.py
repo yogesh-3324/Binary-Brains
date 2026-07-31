@@ -37,7 +37,7 @@ def find_similar_videos(query_path: str, store_dir: str):
     meta_path = os.path.join(store_dir, "frame_meta.npy")
 
     if not (os.path.exists(index_path) and os.path.exists(paths_path) and os.path.exists(meta_path)):
-        print("⚠️ Store files missing in search_video.")
+        print("Store files missing in search_video.")
         return []
 
     index = faiss.read_index(index_path)
