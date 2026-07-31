@@ -7,18 +7,16 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-import torch
 import numpy as np
 import faiss
 from collections import defaultdict
-from PIL import Image
-from utils import get_dino_tools, extract_frames_with_timestamps
+from utils import hash_frames, extract_frames_with_timestamps
 
 # =====================================================
 # CONFIG
 # =====================================================
 SAMPLE_FPS = 1
-FRAME_SIM_THRESHOLD = 0.50  # Minimum frame cosine similarity
+MAX_HAMMING_DISTANCE = 15  # Maximum Hamming distance for frame match (out of 64)
 MATCH_SCORE_THRESHOLD = 0.45 # Minimum confidence score for candidate clip match
 TOP_K_FRAME_NEIGHBORS = 5
 
@@ -40,7 +38,7 @@ def find_similar_videos(query_path: str, store_dir: str):
         print("Store files missing in search_video.")
         return []
 
-    index = faiss.read_index(index_path)
+    index = faiss.read_index_binary(index_path)
     video_paths = np.load(paths_path, allow_pickle=True)
     frame_meta = np.load(meta_path, allow_pickle=True)
 
@@ -52,17 +50,8 @@ def find_similar_videos(query_path: str, store_dir: str):
     if not query_items:
         return []
 
-    dino_model, dino_transform, dino_device = get_dino_tools()
-
     frames = [it["frame"] for it in query_items]
-    tensors = [dino_transform(Image.fromarray(f)) for f in frames]
-    x = torch.stack(tensors).to(dino_device)
-
-    with torch.inference_mode():
-        feats = dino_model(x)
-        feats = torch.nn.functional.normalize(feats, dim=-1)
-
-    query_embeds = feats.cpu().numpy().astype("float32")
+    query_embeds = hash_frames(frames)
     num_query_frames = len(query_embeds)
 
     # 2. FAISS Frame Search (Query each query frame against indexed reference frames)
@@ -81,9 +70,12 @@ def find_similar_videos(query_path: str, store_dir: str):
             if vec_idx == -1:
                 continue
 
-            score = float(distances[q_idx][neighbor_idx])
-            if score < FRAME_SIM_THRESHOLD:
+            dist = float(distances[q_idx][neighbor_idx])
+            if dist > MAX_HAMMING_DISTANCE:
                 continue
+
+            # Convert Hamming distance to a similarity score [0, 1]
+            score = (64.0 - dist) / 64.0
 
             meta = frame_meta[vec_idx]
             ref_path = meta["video"]
@@ -140,7 +132,7 @@ def find_similar_videos(query_path: str, store_dir: str):
         candidate_results.append({
             "video": os.path.basename(ref_path),
             "path": ref_path,
-            "dino_score": round(final_score, 4),
+            "hash_score": round(final_score, 4),
             "confidence": f"{min(100.0, final_score * 100):.2f}%",
             "matched_frames": f"{unique_q_matched} / {num_query_frames} frames",
             "timestamp_range": ts_range_str,
@@ -148,7 +140,7 @@ def find_similar_videos(query_path: str, store_dir: str):
         })
 
     # 5. Sort by final score descending
-    candidate_results.sort(key=lambda x: x["dino_score"], reverse=True)
+    candidate_results.sort(key=lambda x: x["hash_score"], reverse=True)
 
     for rank, res in enumerate(candidate_results[:5], 1):
         res["rank"] = rank

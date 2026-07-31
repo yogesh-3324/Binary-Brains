@@ -7,41 +7,20 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-import torch
 import numpy as np
 import faiss
 import glob
-from PIL import Image
-from utils import get_dino_tools, extract_frames_with_timestamps
+from utils import hash_frames, extract_frames_with_timestamps
 
 # =====================================================
 # CONFIG
 # =====================================================
-STORE_DIR = "dinov2_video_store"
+STORE_DIR = "phash_video_store"
 SAMPLE_INTERVAL_SEC = 2.0  # 1 frame every 2.0 seconds
 
 os.makedirs(STORE_DIR, exist_ok=True)
 
-# =====================================================
-# FRAME EMBEDDING (HIGH SPEED BATCHING)
-# =====================================================
-def embed_frames(frames, model, transform, device, batch_size=32):
-    feats = []
-    for i in range(0, len(frames), batch_size):
-        batch = frames[i:i + batch_size]
-        tensors = [transform(Image.fromarray(f)) for f in batch]
-        x = torch.stack(tensors).to(device)
 
-        with torch.inference_mode():
-            f = model(x)
-            f = torch.nn.functional.normalize(f, dim=-1)
-
-        feats.append(f.cpu().numpy())
-
-    if not feats:
-        return np.array([], dtype="float32")
-
-    return np.vstack(feats).astype("float32")
 
 # =====================================================
 # MAIN FRAME-LEVEL INDEX FUNCTION
@@ -58,7 +37,7 @@ def process_reference_pool(pool_dir: str):
 
     # Load existing state
     if os.path.exists(index_path) and os.path.exists(paths_path) and os.path.exists(meta_path):
-        index = faiss.read_index(index_path)
+        index = faiss.read_index_binary(index_path)
         video_paths = list(np.load(paths_path, allow_pickle=True))
         frame_meta = list(np.load(meta_path, allow_pickle=True))
     else:
@@ -72,9 +51,6 @@ def process_reference_pool(pool_dir: str):
 
     if not new_videos:
         return {"status": "ok", "count": len(video_paths), "newly_added": 0}
-
-    # Load DINOv2 (Cached)
-    model, transform, device = get_dino_tools()
     
     new_vectors_list = []
     added_paths = []
@@ -88,7 +64,7 @@ def process_reference_pool(pool_dir: str):
             continue
 
         frames = [it["frame"] for it in items]
-        embeds = embed_frames(frames, model, transform, device)
+        embeds = hash_frames(frames)
 
         if embeds.size == 0:
             continue
@@ -106,16 +82,16 @@ def process_reference_pool(pool_dir: str):
     if not new_vectors_list:
         return {"status": "ok", "count": len(video_paths), "newly_added": 0}
 
-    new_vectors = np.vstack(new_vectors_list).astype("float32")
+    new_vectors = np.vstack(new_vectors_list).astype(np.uint8)
     
     if index is None:
-        d = new_vectors.shape[1]
-        index = faiss.IndexFlatIP(d) 
+        d = 64 # bits for phash
+        index = faiss.IndexBinaryFlat(d) 
     
     index.add(new_vectors)
     video_paths.extend(added_paths)
 
-    faiss.write_index(index, index_path)
+    faiss.write_index_binary(index, index_path)
     np.save(paths_path, np.array(video_paths, dtype=object))
     np.save(meta_path, np.array(frame_meta, dtype=object))
 
@@ -160,16 +136,17 @@ def remove_video_from_index(filename: str):
         if os.path.exists(meta_path): os.remove(meta_path)
         return True
 
-    old_index = faiss.read_index(index_path)
-    vectors = old_index.reconstruct_n(0, old_index.ntotal)
+    old_index = faiss.read_index_binary(index_path)
+    # Extract all stored binary vectors from the flat index
+    all_vectors = faiss.vector_to_array(old_index.xb).reshape(old_index.ntotal, -1)
 
-    new_vectors = vectors[keep_indices]
+    new_vectors = all_vectors[keep_indices].astype(np.uint8)
     new_frame_meta = [frame_meta[i] for i in keep_indices]
 
-    index = faiss.IndexFlatIP(new_vectors.shape[1])
+    index = faiss.IndexBinaryFlat(64)
     index.add(new_vectors)
 
-    faiss.write_index(index, index_path)
+    faiss.write_index_binary(index, index_path)
     np.save(paths_path, np.array(new_video_paths, dtype=object))
     np.save(meta_path, np.array(new_frame_meta, dtype=object))
 

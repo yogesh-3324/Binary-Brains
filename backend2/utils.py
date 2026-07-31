@@ -7,55 +7,33 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-import torch
 import cv2
 import numpy as np
 from PIL import Image
-import torchvision.transforms as T
-
-# Optimize PyTorch CPU Threads for maximum throughput
-torch.set_num_threads(max(1, (os.cpu_count() or 4) // 2))
+import imagehash
 
 # ==========================================
-# GLOBAL CACHE (PREVENTS RELOADING)
+# PERCEPTUAL VIDEO HASHING
 # ==========================================
-_DINO_MODEL = None
-_DINO_TRANSFORM = None
-
-def get_device():
-    return "cuda" if torch.cuda.is_available() else "cpu"
-
-# ==========================================
-# HIGH-SPEED MODEL LOADER (dinov2_vits14)
-# ==========================================
-def get_dino_tools(model_name="dinov2_vits14"):
+def hash_frames(frames):
     """
-    Uses dinov2_vits14 (Small ViT, 21M params) which is 4x faster than ViT-Base 
-    with virtually identical accuracy for visual retrieval.
+    Computes a 64-bit phash for each frame.
+    Returns a numpy array of uint8, shape (N, 8) suitable for faiss.IndexBinaryFlat.
     """
-    global _DINO_MODEL, _DINO_TRANSFORM
-    
-    if _DINO_MODEL is None:
-        print(f"Loading Fast DINOv2 ({model_name})...")
-        device = get_device()
-        
-        # Load Model
-        model = torch.hub.load("facebookresearch/dinov2", model_name)
-        model.to(device).eval()
+    if not frames:
+        return np.empty((0, 8), dtype=np.uint8)
 
-        # Transform (Aspect ratio center crop for vertical vs horizontal video matching)
-        transform = T.Compose([
-            T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
-            T.CenterCrop(224),
-            T.ToTensor(),
-            T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-        ])
-        
-        _DINO_MODEL = model
-        _DINO_TRANSFORM = transform
-        print("Fast DINOv2 Loaded")
+    hashed_bytes = []
+    for f in frames:
+        pil_img = Image.fromarray(f)
+        h = imagehash.phash(pil_img, hash_size=8)
+        # h.hash is a boolean numpy array of shape (8, 8)
+        # We flatten it to 64 bits and pack it into 8 uint8 bytes
+        bool_array = h.hash.flatten()
+        packed = np.packbits(bool_array)
+        hashed_bytes.append(packed)
     
-    return _DINO_MODEL, _DINO_TRANSFORM, get_device()
+    return np.vstack(hashed_bytes).astype(np.uint8)
 
 # ==========================================
 # ULTRA-FAST DIRECT SEEKING FRAME EXTRACTOR

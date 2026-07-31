@@ -195,9 +195,9 @@ const DuplicateVid = () => {
       
       const mappedResults: Result[] = (data.results || []).map((r: any) => ({
         name: r.video,
-        score: r.dino_score ?? r.clip_score ?? r.score ?? 0,
+        score: r.hash_score ?? r.dino_score ?? r.clip_score ?? r.score ?? 0,
         status: r.verdict ?? "MATCH",
-        confidence: r.confidence ?? `${((r.dino_score ?? 0) * 100).toFixed(1)}%`,
+        confidence: r.confidence ?? `${((r.hash_score ?? r.dino_score ?? 0) * 100).toFixed(1)}%`,
         timestamp_range: r.timestamp_range,
         matched_frames: r.matched_frames
       }));

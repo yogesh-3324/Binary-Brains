@@ -38,7 +38,7 @@ app.add_middleware(
 UPLOAD_DIR = "uploads"
 POOL_DIR = os.path.join(UPLOAD_DIR, "pool")
 QUERY_DIR = os.path.join(UPLOAD_DIR, "query")
-STORE_DIR = "dinov2_video_store"
+STORE_DIR = "phash_video_store"
 
 os.makedirs(POOL_DIR, exist_ok=True)
 os.makedirs(QUERY_DIR, exist_ok=True)
