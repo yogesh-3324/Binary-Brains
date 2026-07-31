@@ -90,6 +90,42 @@ ndid/
 
 ---
 
+## System Flowcharts
+
+### 1. Image Processing & Duplicate Search Pipeline
+
+```mermaid
+graph TD
+    A["Query Image Upload"] --> B["Image Preprocessing & Resizing (224x224)"]
+    B --> C["DINOv2 Feature Extraction (dinov2_vits14)"]
+    C --> D["384-dimensional Vector Normalization (L2)"]
+    D --> E["FAISS IndexFlatIP Cosine Similarity Search"]
+    E --> F{"Cosine Similarity >= 0.70 Threshold?"}
+    F -- Yes --> G["Flag as Duplicate / Modified Image Match"]
+    F -- No --> H["No Duplicate Found"]
+```
+
+### 2. Video Fingerprinting & Sub-Clip Retrieval Pipeline
+
+```mermaid
+graph TD
+    A["Query Video Upload"] --> B["Hardware Seeking Frame Extraction (1.5s - 2.0s Interval)"]
+    B --> C["Keyframe Perceptual Hashing (64-bit DCT pHash)"]
+    C --> D["Bit Packing into 8-byte uint8 Arrays"]
+    D --> E["FAISS IndexBinaryFlat(64) Hamming Distance Search"]
+    E --> F{"Hamming Distance <= 15 bits?"}
+    F -- Yes --> G["Collect Matched Keyframe Pairs (Query Time t_q, Ref Time t_r)"]
+    F -- No --> H["Discard Non-Matching Keyframe"]
+    G --> I["Compute Temporal Offset (Delta t = t_r - t_q)"]
+    I --> J["Sliding Window Offset Consensus Binning (1.5s Tolerance)"]
+    J --> K["Extract Dominant Cluster & Compute Clip Coverage Ratio"]
+    K --> L{"Final Score >= 0.45 Threshold?"}
+    L -- Yes --> M["Output Sub-Clip Match with Timestamp Range & Confidence Score"]
+    L -- No --> N["No Sub-Clip Match Found"]
+```
+
+---
+
 ## How It Works: Algorithms and Techniques
 
 ### Image Duplicate Detection Pipeline
