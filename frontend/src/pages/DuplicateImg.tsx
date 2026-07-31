@@ -39,7 +39,7 @@ const BackIcon = () => (
 
 // ---------------- COMPONENT ----------------
 // ---------------- CONFIG ----------------
-const API_BASE = import.meta.env.VITE_IMAGE_API_URL || "http://localhost:8000";
+const API_BASE = (import.meta.env.VITE_IMAGE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
 const DuplicateImg = () => {
   const [poolImages, setPoolImages] = useState<ImagePreview[]>([]);
@@ -71,7 +71,7 @@ const DuplicateImg = () => {
     files.forEach(f => formData.append("files", f));
 
     try {
-      await fetch("http://localhost:8000/upload/pool", {
+      await fetch(`${API_BASE}/upload/pool`, {
         method: "POST",
         body: formData,
       });
@@ -110,7 +110,7 @@ const DuplicateImg = () => {
     
     // Call Delete API
     try {
-      await fetch(`http://localhost:8000/delete/pool/${imgToRemove.name}`, {
+      await fetch(`${API_BASE}/delete/pool/${imgToRemove.name}`, {
         method: "DELETE",
       });
     } catch (err) {
@@ -133,7 +133,7 @@ const DuplicateImg = () => {
     const formData = new FormData();
     formData.append("file", file);
     try {
-      await fetch("http://localhost:8000/upload/query", {
+      await fetch(`${API_BASE}/upload/query`, {
         method: "POST",
         body: formData,
       });
@@ -151,7 +151,7 @@ const DuplicateImg = () => {
   // 5. HELPER: Clear Query Image from Backend
   const removeQueryImage = async () => {
     try {
-      await fetch("http://localhost:8000/delete/query", { method: "DELETE" });
+      await fetch(`${API_BASE}/delete/query`, { method: "DELETE" });
     } catch (err) { console.error(err) }
     setQueryImage(null);
   }
@@ -176,7 +176,7 @@ const DuplicateImg = () => {
 
     try {
       // Just GET /analyze, no body needed
-      const response = await fetch("http://localhost:8000/analyze", {
+      const response = await fetch(`${API_BASE}/analyze`, {
         method: "GET", 
       });
 
@@ -194,7 +194,7 @@ const DuplicateImg = () => {
   };
 
   const handleViewResultImage = (fileName: string) => {
-    const imageUrl = `http://localhost:8000/images/pool/${fileName}`;
+    const imageUrl = `${API_BASE}/images/pool/${fileName}`;
     setSelectedLightboxImage({ preview: imageUrl, name: fileName });
   };
 

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { LogoBrand } from "../components/Logo";
 
 // ---------------- CONFIG ----------------
-const API_BASE = import.meta.env.VITE_VIDEO_API_URL || "http://localhost:8001";
+const API_BASE = (import.meta.env.VITE_VIDEO_API_URL || "http://localhost:8001").replace(/\/+$/, "");
 
 // ---------------- TYPES ----------------
 type Result = {
