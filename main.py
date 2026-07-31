@@ -12,7 +12,7 @@ import imagehash
 # DINOv2 SETUP
 # ----------------------------
 
-def get_dino_tools(model_name="dinov2_vitb14"):
+def get_dino_tools(model_name="dinov2_vits14"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
@@ -119,7 +119,7 @@ def process_reference_pool(folder_path):
     path_index = os.path.join(save_dir, "dinov2.index")
 
     # 3. Load Existing Data (if available)
-    old_vectors = np.empty((0, 768), dtype="float32") # 768 is DINOv2-ViT-B dimension
+    old_vectors = np.empty((0, 384), dtype="float32") # 384 is DINOv2-ViT-S dimension
     old_paths = np.array([])
     old_hashes = np.array([])
     

@@ -63,7 +63,7 @@ def cropfinds(path1,path2):
         return False
 
     return True
-def get_dino_tools(model_name="dinov2_vitb14"):
+def get_dino_tools(model_name="dinov2_vits14"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
@@ -119,7 +119,7 @@ def embed_query_with_rotations(image_path, model, transform, device):
 
             vectors.append(features.cpu().numpy())
 
-        return np.vstack(vectors).astype("float32")  # Returns shape (4, 768)
+        return np.vstack(vectors).astype("float32")  # Returns shape (4, 384)
     except Exception as e:
         print(f"Error rotating/embedding query: {e}")
         return np.array([])

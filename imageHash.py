@@ -63,7 +63,7 @@ def cropfinds(path1,path2):
         return False
 
     return True
-def get_dino_tools(model_name="dinov2_vitb14"):
+def get_dino_tools(model_name="dinov2_vits14"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
