@@ -65,6 +65,8 @@ def on_rm_error(func, path, exc_info):
     else:
         print(f"Warning: Could not delete {path}. File might be in use.")
 
+from pinecone_db import get_pinecone_video_store
+
 # =====================================================
 # RESET (FIXED)
 # =====================================================
@@ -78,7 +80,14 @@ def reset_backend():
             except Exception as e:
                 print(f"Could not remove {f}: {e}")
 
-    # 2. Clear Vector Store (Windows Safe)
+    # 2. Clear Pinecone Video DB
+    try:
+        pinecone_video_store = get_pinecone_video_store()
+        pinecone_video_store.delete_all()
+    except Exception as e:
+        print(f"Warning clearing Pinecone video index: {e}")
+
+    # 3. Clear Local Vector Store (Windows Safe)
     if os.path.exists(STORE_DIR):
         try:
             # Try to remove the whole tree
@@ -185,8 +194,11 @@ async def trigger_analysis():
     # Index new files if any
     try:
         train_status = process_reference_pool(POOL_DIR)
+        print(f"Indexing Status: {train_status}")
     except Exception as e:
         print(f"Indexing Error: {e}")
+        import traceback
+        traceback.print_exc()
         # Continue anyway, maybe index is already good
 
     # Run Search

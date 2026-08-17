@@ -8,16 +8,16 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import numpy as np
-import faiss
+from pinecone_db import get_pinecone_video_store
 from collections import defaultdict
-from utils import hash_frames, extract_frames_with_timestamps
+from utils import extract_frames_with_timestamps, embed_video_frames
 
 # =====================================================
 # CONFIG
 # =====================================================
 SAMPLE_FPS = 1
-MAX_HAMMING_DISTANCE = 15  # Maximum Hamming distance for frame match (out of 64)
-MATCH_SCORE_THRESHOLD = 0.45 # Minimum confidence score for candidate clip match
+FRAME_SCORE_THRESHOLD = 0.70  # Minimum DINOv2 visual similarity for keyframe match
+MATCH_SCORE_THRESHOLD = 0.55  # Minimum final confidence score for candidate clip match
 TOP_K_FRAME_NEIGHBORS = 5
 
 def format_time(seconds: float) -> str:
@@ -30,20 +30,8 @@ def format_time(seconds: float) -> str:
 # SUB-CLIP TEMPORAL ALIGNMENT SEARCH LOGIC
 # =====================================================
 def find_similar_videos(query_path: str, store_dir: str):
-    index_path = os.path.join(store_dir, "videos.index")
     paths_path = os.path.join(store_dir, "video_paths.npy")
     meta_path = os.path.join(store_dir, "frame_meta.npy")
-
-    if not (os.path.exists(index_path) and os.path.exists(paths_path) and os.path.exists(meta_path)):
-        print("Store files missing in search_video.")
-        return []
-
-    index = faiss.read_index_binary(index_path)
-    video_paths = np.load(paths_path, allow_pickle=True)
-    frame_meta = np.load(meta_path, allow_pickle=True)
-
-    if index.ntotal == 0 or len(frame_meta) == 0:
-        return []
 
     # 1. Extract Query Frames & Timestamps (1 frame every 1.5 seconds)
     query_items = extract_frames_with_timestamps(query_path, sample_interval_sec=1.5)
@@ -51,43 +39,44 @@ def find_similar_videos(query_path: str, store_dir: str):
         return []
 
     frames = [it["frame"] for it in query_items]
-    query_embeds = hash_frames(frames)
-    num_query_frames = len(query_embeds)
+    num_query_frames = len(frames)
 
-    # 2. FAISS Frame Search (Query each query frame against indexed reference frames)
-    k_neighbors = min(TOP_K_FRAME_NEIGHBORS, index.ntotal)
-    distances, indices = index.search(query_embeds, k_neighbors)
+    # 2. Extract DINOv2 384-dim visual embeddings for query keyframes
+    query_embeds = embed_video_frames(frames)
+    if query_embeds.size == 0:
+        return []
 
-    # 3. Collect Frame Matches grouped by candidate reference video
-    # Structure: video_matches[video_path] = list of {"q_ts", "ref_ts", "score", "offset"}
+    # 3. Pinecone Video Search (Query each query frame against indexed reference keyframes)
     video_matches = defaultdict(list)
+    try:
+        pinecone_video_store = get_pinecone_video_store()
+        print("Querying Pinecone Video Database for DINOv2 keyframe visual matches...")
 
-    for q_idx in range(num_query_frames):
-        q_ts = query_items[q_idx]["timestamp"]
+        for q_idx, q_item in enumerate(query_items):
+            q_ts = q_item["timestamp"]
+            q_embed = query_embeds[q_idx]
 
-        for neighbor_idx in range(k_neighbors):
-            vec_idx = indices[q_idx][neighbor_idx]
-            if vec_idx == -1:
-                continue
+            matches = pinecone_video_store.query_frame_vector(q_embed, top_k=TOP_K_FRAME_NEIGHBORS)
 
-            dist = float(distances[q_idx][neighbor_idx])
-            if dist > MAX_HAMMING_DISTANCE:
-                continue
+            for m in matches:
+                meta = m.get("metadata", {})
+                ref_path = meta.get("video") or meta.get("filename", "")
+                ref_ts = float(meta.get("timestamp", 0.0))
+                score = float(m.get("score", 0.0))
+                offset = round(ref_ts - q_ts, 1)
 
-            # Convert Hamming distance to a similarity score [0, 1]
-            score = (64.0 - dist) / 64.0
+                # Strict frame similarity threshold
+                if ref_path and score >= FRAME_SCORE_THRESHOLD:
+                    video_matches[ref_path].append({
+                        "q_ts": q_ts,
+                        "ref_ts": ref_ts,
+                        "score": score,
+                        "offset": offset
+                    })
 
-            meta = frame_meta[vec_idx]
-            ref_path = meta["video"]
-            ref_ts = meta["timestamp"]
-            offset = round(ref_ts - q_ts, 1)
-
-            video_matches[ref_path].append({
-                "q_ts": q_ts,
-                "ref_ts": ref_ts,
-                "score": score,
-                "offset": offset
-            })
+    except Exception as e:
+        print(f"Warning querying Pinecone for video search: {e}")
+        return []
 
     # 4. Temporal Offset Consensus Clustering per candidate video
     candidate_results = []
@@ -116,8 +105,15 @@ def find_similar_videos(query_path: str, store_dir: str):
         # Coverage ratio of the query clip
         coverage = unique_q_matched / num_query_frames
 
-        # Weighted final score combining frame cosine similarity and temporal clip coverage
-        final_score = (0.6 * avg_cluster_score) + (0.4 * coverage)
+        # STRICT FALSE POSITIVE GUARD:
+        # If query has multiple frames (>= 3), require at least 2 distinct temporal keyframes matched!
+        # A single accidental 1-frame match in a multi-frame video will be rejected.
+        if num_query_frames >= 3 and unique_q_matched < 2:
+            print(f"Rejecting single-frame candidate match for {os.path.basename(ref_path)} (Matched {unique_q_matched}/{num_query_frames} frames)")
+            continue
+
+        # Weighted final score combining keyframe cosine similarity (70%) and clip coverage (30%)
+        final_score = (0.70 * avg_cluster_score) + (0.30 * coverage)
 
         if final_score < MATCH_SCORE_THRESHOLD:
             continue
@@ -127,7 +123,7 @@ def find_similar_videos(query_path: str, store_dir: str):
         end_ts = max(ref_timestamps)
         ts_range_str = f"{format_time(start_ts)} - {format_time(end_ts)}"
 
-        verdict = "ORIGINAL SOURCE MATCH" if final_score >= 0.70 else "SUB-CLIP MATCH"
+        verdict = "ORIGINAL SOURCE MATCH" if final_score >= 0.75 else "SUB-CLIP MATCH"
 
         candidate_results.append({
             "video": os.path.basename(ref_path),

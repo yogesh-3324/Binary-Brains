@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from main import process_reference_pool, remove_image_from_index,add_image_to_index
 from imageHash import find_similar_images
 
+from pinecone_db import get_pinecone_store
+
 app = FastAPI()
 
 app.add_middleware(
@@ -45,7 +47,7 @@ app.mount("/images", StaticFiles(directory="uploads"), name="images")
 # ---------------------------------------------------------
 @app.post("/reset")
 def reset_backend():
-    """Clears all images AND FAISS index (full reset)"""
+    """Clears all images AND Pinecone vector index (full reset)"""
 
     # -----------------------------
     # 1. Clear pool images
@@ -66,18 +68,28 @@ def reset_backend():
             pass
 
     # -----------------------------
-    # 3. Clear FAISS index + metadata
+    # 3. Clear Pinecone vector DB
     # -----------------------------
-    FAISS_DIR = "dinov2_faiss_store"
-    faiss_files = [
-        "dinov2.index",
+    pinecone_cleared = False
+    try:
+        pinecone_store = get_pinecone_store()
+        pinecone_store.delete_all()
+        pinecone_cleared = True
+    except Exception as e:
+        print(f"Warning clearing Pinecone index: {e}")
+
+    # -----------------------------
+    # 4. Clear local cache metadata
+    # -----------------------------
+    PINECONE_DIR = "dinov2_pinecone_store"
+    cache_files = [
         "image_vectors.npy",
         "image_paths.npy",
         "image_hashes.npy",
     ]
 
-    for fname in faiss_files:
-        path = os.path.join(FAISS_DIR, fname)
+    for fname in cache_files:
+        path = os.path.join(PINECONE_DIR, fname)
         if os.path.exists(path):
             try:
                 os.remove(path)
@@ -88,7 +100,7 @@ def reset_backend():
         "status": "fully_reset",
         "pool_cleared": True,
         "query_cleared": True,
-        "faiss_cleared": True
+        "pinecone_cleared": pinecone_cleared
     }
 @app.post("/upload/pool")
 async def upload_pool(files: List[UploadFile] = File(...)):
@@ -102,8 +114,15 @@ async def upload_pool(files: List[UploadFile] = File(...)):
         saved_files.append(file.filename)
         await file.close()
 
-    # Incrementally embed any new reference pool images into FAISS
-    status = process_reference_pool(POOL_DIR)
+    # Incrementally embed any new reference pool images into Pinecone
+    try:
+        status = process_reference_pool(POOL_DIR)
+    except Exception as e:
+        print(f"[Upload Error] Failed to process reference pool in Pinecone: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pinecone Vector Store Error: {str(e)}"
+        )
 
     return {
         "added": saved_files,
@@ -196,7 +215,7 @@ def trigger_analysis():
 
     # 3. Search
     print(f"DEBUG: Searching for matches...")
-    matches = find_similar_images(query_path, store_dir="dinov2_faiss_store")
+    matches = find_similar_images(query_path, store_dir="dinov2_pinecone_store")
     
     # --- SAFER PRINT LOGIC ---
     if matches is None:

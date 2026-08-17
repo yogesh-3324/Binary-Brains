@@ -8,9 +8,11 @@ services:
     container_name: binary_brains_image_backend
     ports:
       - "8000:8000"
+    environment:
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_INDEX_NAME=${PINECONE_INDEX_NAME:-image-search-index}
     volumes:
       - ./backend/uploads:/app/uploads
-      - ./backend/dinov2_faiss_store:/app/dinov2_faiss_store
     restart: unless-stopped
 
   backend-video:
@@ -20,9 +22,11 @@ services:
     container_name: binary_brains_video_backend
     ports:
       - "8001:8001"
+    environment:
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_INDEX_NAME=${PINECONE_INDEX_NAME:-video-search-index}
     volumes:
       - ./backend2/uploads:/app/uploads
-      - ./backend2/dinov2_video_store:/app/dinov2_video_store
     restart: unless-stopped
 
   frontend:

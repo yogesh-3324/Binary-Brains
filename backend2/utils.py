@@ -11,6 +11,73 @@ import cv2
 import numpy as np
 from PIL import Image
 import imagehash
+import torch
+import torchvision.transforms as T
+
+# ==========================================
+# DINOv2 FEATURE EXTRACTOR FOR VIDEO FRAMES
+# ==========================================
+_DINO_MODEL = None
+_DINO_TRANSFORM = None
+_DINO_DEVICE = None
+
+def get_dino_tools(model_name="dinov2_vits14"):
+    global _DINO_MODEL, _DINO_TRANSFORM, _DINO_DEVICE
+    if _DINO_MODEL is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Loading DINOv2 ({model_name}) for video frames on {device}...")
+        model = torch.hub.load("facebookresearch/dinov2", model_name)
+        model = model.to(device).eval()
+
+        transform = T.Compose([
+            T.Resize((224, 224)),
+            T.Grayscale(num_output_channels=3),
+            T.ToTensor(),
+            T.Normalize(
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225)
+            ),
+        ])
+        _DINO_MODEL = model
+        _DINO_TRANSFORM = transform
+        _DINO_DEVICE = device
+    return _DINO_MODEL, _DINO_TRANSFORM, _DINO_DEVICE
+
+def embed_video_frames(frames, batch_size=16):
+    """
+    Computes DINOv2 384-dim normalized visual embeddings for a list of RGB numpy frames.
+    """
+    if not frames:
+        return np.empty((0, 384), dtype=np.float32)
+
+    model, transform, device = get_dino_tools()
+    embeddings = []
+
+    for i in range(0, len(frames), batch_size):
+        batch_frames = frames[i : i + batch_size]
+        batch_tensors = []
+
+        for f in batch_frames:
+            try:
+                pil_img = Image.fromarray(f).convert("RGB")
+                img_tensor = transform(pil_img)
+                batch_tensors.append(img_tensor)
+            except Exception as e:
+                print(f"Error processing frame: {e}")
+
+        if not batch_tensors:
+            continue
+
+        batch_stack = torch.stack(batch_tensors).to(device)
+        with torch.inference_mode():
+            features = model(batch_stack)
+            features = torch.nn.functional.normalize(features, dim=-1)
+            embeddings.append(features.cpu().numpy())
+
+    if not embeddings:
+        return np.empty((0, 384), dtype=np.float32)
+
+    return np.vstack(embeddings).astype("float32")
 
 # ==========================================
 # PERCEPTUAL VIDEO HASHING

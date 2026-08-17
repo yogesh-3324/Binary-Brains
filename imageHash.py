@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-import faiss
+from pinecone_db import get_pinecone_store
 import os
 from PIL import Image
 import torchvision.transforms as T
@@ -107,11 +107,8 @@ def embed_query_with_rotations(image_path, model, transform, device):
             # expand=True ensures we don't crop corners when rotating
             rotated = image.rotate(angle, expand=True)
             
-            # Resize BEFORE transform to keep consistent logic
-            rotated_resized = rotated.resize((500, 500)) 
-            
-            # Transform (includes Grayscale conversion)
-            img_tensor = transform(rotated_resized).unsqueeze(0).to(device)
+            # Transform (includes Grayscale conversion and 224x224 resize)
+            img_tensor = transform(rotated).unsqueeze(0).to(device)
 
             with torch.no_grad():
                 features = model(img_tensor)
@@ -119,7 +116,7 @@ def embed_query_with_rotations(image_path, model, transform, device):
 
             vectors.append(features.cpu().numpy())
 
-        return np.vstack(vectors).astype("float32")  # Returns shape (4, 768)
+        return np.vstack(vectors).astype("float32")  # Returns shape (4, 384)
     except Exception as e:
         print(f"Error rotating/embedding query: {e}")
         return np.array([])
@@ -135,30 +132,15 @@ def compute_phash(image_path):
         return None
 
 
-def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
-    index_path = os.path.join(store_dir, "dinov2.index")
-
-    if not os.path.exists(index_path):
-        return {"error": "Index not found. Upload reference images first."}
-
-    # Load stored data
-    try:
-        image_files = np.load(os.path.join(store_dir, "image_paths.npy"), allow_pickle=True)
-        image_hashes = np.load(os.path.join(store_dir, "image_hashes.npy"), allow_pickle=True)
-        index = faiss.read_index(index_path)
-    except Exception as e:
-        return {"error": f"Failed to load index: {e}"}
-
+def find_similar_images(query_image_path, store_dir="dinov2_pinecone_store"):
     if not os.path.exists(query_image_path):
         return {"error": "Query image not found."}
-
 
     query_hash = compute_phash(query_image_path)
     if query_hash is None:
         return {"error": "Failed to compute pHash."}
 
     # GENERATE 4 VECTORS (Original + 3 Rotations)
-    # These will be Grayscale thanks to the transform
     query_vectors = embed_query_with_rotations(
         query_image_path, MODEL, TRANSFORM, DEVICE
     )
@@ -166,25 +148,8 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
     if query_vectors.size == 0:
         return {"error": "Failed to process query image embeddings."}
 
-  
-
-    HASH_THRESHOLD = 8
-    candidate_indices = []
-
-    for i, h in enumerate(image_hashes):
-        try:
-            stored_hash = imagehash.hex_to_hash(str(h))
-            if query_hash - stored_hash <= HASH_THRESHOLD:
-                candidate_indices.append(i)
-        except:
-            continue
-
-    print(f"Hash candidates found: {len(candidate_indices)}")
-
-
-    # Thresholds (Grayscale should give high similarity for color-shifted duplicates)
-    EXACT_MATCH_THR = 0.98
-    NEAR_DUP_THR = 0.89
+    EXACT_MATCH_THR = 0.95
+    NEAR_DUP_THR = 0.70
 
     def classify_score(s):
         if s >= EXACT_MATCH_THR: return "Exactly Same"
@@ -192,112 +157,92 @@ def find_similar_images(query_image_path, store_dir="dinov2_faiss_store"):
         return "Different"
 
     final_results_map = {} 
+    path_map = {}
 
-    def search_vectors(search_index, search_k, id_map_func):
-        # Check all 4 query rotations against the index
+    try:
+        pinecone_store = get_pinecone_store()
+        print("Querying Pinecone Vector Database...")
+        
         for qv in query_vectors:
-            dists, idxs = search_index.search(qv.reshape(1, -1), search_k)
-            
-            for rank in range(idxs.shape[1]):
-                found_idx = idxs[0][rank]
-                if found_idx == -1: continue
+            matches = pinecone_store.query_similar(qv, top_k=10)
+            for m in matches:
+                meta = m.get("metadata", {})
+                filename = meta.get("filename") or m.get("id")
+                img_path = meta.get("image_path", "")
+                score = float(m.get("score", 0.0))
                 
-                real_idx = id_map_func(found_idx)
-                score = float(dists[0][rank])
-                
-                # Update if this rotation gave a better score for this image
-                if real_idx in final_results_map:
-                    if score > final_results_map[real_idx]:
-                        final_results_map[real_idx] = score
-                else:
-                    final_results_map[real_idx] = score
+                if filename:
+                    path_map[filename] = img_path
+                    if filename in final_results_map:
+                        final_results_map[filename] = max(final_results_map[filename], score)
+                    else:
+                        final_results_map[filename] = score
+    except Exception as e:
+        print(f"Pinecone query error: {e}")
+        # Fallback to local numpy metadata cache if available
+        paths_file = os.path.join(store_dir, "image_paths.npy")
+        if os.path.exists(paths_file):
+            print("Falling back to local numpy metadata cache...")
+            image_files = np.load(paths_file, allow_pickle=True)
+            image_hashes = np.load(os.path.join(store_dir, "image_hashes.npy"), allow_pickle=True)
+            HASH_THRESHOLD = 12
+            for i, h in enumerate(image_hashes):
+                try:
+                    stored_hash = imagehash.hex_to_hash(str(h))
+                    if query_hash - stored_hash <= HASH_THRESHOLD:
+                        fn = os.path.basename(image_files[i])
+                        final_results_map[fn] = 0.85
+                        path_map[fn] = image_files[i]
+                except:
+                    continue
 
-    if candidate_indices:
-        # SEARCH SUBSET (Hash Candidates)
-        if(len(candidate_indices)==1):
-            idx = candidate_indices[0]
-            stored_vector = index.reconstruct(int(idx)).reshape(1, -1)
-            best_score = 0.0
-            for qv in query_vectors:
-                score = float(np.dot(qv, stored_vector.T).item())
-                if score > best_score:
-                    best_score = score
-            if(best_score>=.97):
-                return [{
-                "name": os.path.basename(image_files[idx]),
-                "score": round(best_score, 4),
-                "status": "Exactly Same"
-                       }]
-            elif(best_score>=.7):
-                return [{
-                "name": os.path.basename(image_files[idx]),
-                "score": round(.9, 4),
-                "status": "Near Duplicate"
-                       }]
-
-        
-        print("Searching within hash-filtered candidates")
-        candidate_vectors = np.array([index.reconstruct(int(i)) for i in candidate_indices])
-        
-        temp_index = faiss.IndexFlatIP(candidate_vectors.shape[1])
-        temp_index.add(candidate_vectors)
-
-        k = min(5, len(candidate_indices))
-        id_mapper = lambda temp_id: candidate_indices[temp_id]
-        search_vectors(temp_index, k, id_mapper)
-
-    else:
-        # SEARCH ALL (Fallback)
-        print("No hash matches found, doing full FAISS search")
-        k = 5
-        id_mapper = lambda real_id: real_id
-        search_vectors(index, k, id_mapper)
-
-  
     results = []
     sorted_matches = sorted(final_results_map.items(), key=lambda x: -x[1])
-    maxi=0
-    for idx, score in sorted_matches:
-        if score < 0.60: 
+    maxi = 0
+
+    for filename, score in sorted_matches:
+        if score < 0.50: 
             continue
-        maxi=max(maxi,score)
+        maxi = max(maxi, score)
 
         results.append({
-            "name": os.path.basename(image_files[idx]),
+            "name": filename,
             "score": round(score, 4),
             "status": classify_score(score)
         })
-    print(maxi)    
-    if(maxi<0.9):
-        for idx,score in sorted_matches:
-            path1=image_files[idx]
-            path2=query_image_path
-            if(score<0.4):
-                continue
-            res=cropfinds(path1,path2)
-            print(res)
-            if 0.6 <= score < 0.96:
-               status = "Near Duplicate"
-            elif score < 0.6:
-               status = "This might match your image"
-            else:
-               status = "Exactly Same"
-            print(res)   
 
-            if(score>=0.4 and score<0.6):
-                score=0.8
-            elif(score>=0.6 and score<0.8):
-                score=0.85
-            elif(score>=0.8):
-                score=0.96        
-            if(res):
-                return[{
-                "name": os.path.basename(image_files[idx]),
-                "score": round(score, 4),
-                "status": status
+    print(f"Max match score: {maxi}")    
+
+    if maxi < 0.88 and sorted_matches:
+        for filename, score in sorted_matches:
+            path1 = path_map.get(filename, "")
+            path2 = query_image_path
+            if score < 0.4 or not os.path.exists(path1):
+                continue
+            res = cropfinds(path1, path2)
+            print(f"Homography result for {filename}: {res}")
+            
+            if 0.6 <= score < 0.96:
+                status = "Near Duplicate"
+            elif score < 0.6:
+                status = "This might match your image"
+            else:
+                status = "Exactly Same"
+
+            if 0.4 <= score < 0.6:
+                score = 0.8
+            elif 0.6 <= score < 0.8:
+                score = 0.85
+            elif score >= 0.8:
+                score = 0.96        
+            
+            if res:
+                return [{
+                    "name": filename,
+                    "score": round(score, 4),
+                    "status": status
                 }]
             
-    
     return results[:5]
 
 if __name__ == "__main__":
