@@ -75,6 +75,7 @@ const DuplicateVid = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noMatchMessage, setNoMatchMessage] = useState<string | null>(null);
 
   // RESET FUNCTION
   const resetBackend = async () => {
@@ -84,6 +85,7 @@ const DuplicateVid = () => {
       setQueryVideo(null);
       setResults([]);
       setError(null);
+      setNoMatchMessage(null);
     } catch (err) {
       console.error("Backend offline", err);
       setError("Could not connect to analysis server. Is it running?");
@@ -216,6 +218,7 @@ const DuplicateVid = () => {
 
     setIsAnalyzing(true);
     setError(null);
+    setNoMatchMessage(null);
     try {
       const res = await fetch(`${API_BASE}/analyze`);
       const data = await res.json();
@@ -230,6 +233,10 @@ const DuplicateVid = () => {
       }));
 
       setResults(mappedResults.sort((a, b) => b.score - a.score));
+
+      if (mappedResults.length === 0 && data.message) {
+        setNoMatchMessage(data.message);
+      }
     } catch (err) {
       setError("Analysis failed. Please try again.");
     } finally {
@@ -359,6 +366,18 @@ const DuplicateVid = () => {
                   </>
                 ) : "Find Original Video"}
               </button>
+
+              {noMatchMessage && results.length === 0 && (
+                <div className="mt-6 border-t border-slate-100 pt-6">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-center">
+                    <svg className="w-10 h-10 text-amber-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <p className="text-amber-800 font-semibold text-sm">{noMatchMessage}</p>
+                    <p className="text-amber-600 text-xs mt-1">Try uploading more reference videos or a different query clip.</p>
+                  </div>
+                </div>
+              )}
 
               {results.length > 0 && (
                 <div className="mt-6 border-t border-slate-100 pt-6 animate-in fade-in slide-in-from-bottom-2">

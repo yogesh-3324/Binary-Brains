@@ -50,8 +50,23 @@ class PineconeVideoStore:
         self._client = Pinecone(api_key=key)
 
         try:
-            existing_indexes = [idx.name for idx in self._client.list_indexes()]
-            if idx_name not in existing_indexes:
+            existing_indexes = self._client.list_indexes()
+            existing_names = [idx.name for idx in existing_indexes]
+            if idx_name in existing_names:
+                # Check if existing index has the correct dimension
+                idx_info = next(idx for idx in existing_indexes if idx.name == idx_name)
+                existing_dim = getattr(idx_info, 'dimension', None)
+                if existing_dim is not None and existing_dim != self.dimension:
+                    print(f"[Pinecone Video] Index '{idx_name}' has dimension {existing_dim}, but expected {self.dimension}. Deleting and recreating...")
+                    try:
+                        self._client.delete_index(idx_name)
+                        import time
+                        time.sleep(5)  # Wait for deletion to propagate
+                    except Exception as e:
+                        print(f"[Pinecone Video] Warning deleting stale index: {e}")
+                    existing_names = []  # Force recreation below
+
+            if idx_name not in existing_names:
                 print(f"[Pinecone Video] Index '{idx_name}' not found. Creating (dim={self.dimension}, metric={self.metric})...")
                 try:
                     self._client.create_index(
@@ -60,6 +75,8 @@ class PineconeVideoStore:
                         metric=self.metric,
                         spec=ServerlessSpec(cloud="aws", region="us-east-1")
                     )
+                    import time
+                    time.sleep(5)  # Wait for index to be ready
                     print(f"[Pinecone Video] Created index '{idx_name}' successfully.")
                 except Exception as e:
                     print(f"[Pinecone Video] Warning creating index '{idx_name}': {e}")
