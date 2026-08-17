@@ -208,6 +208,12 @@ async def trigger_analysis():
         STORE_DIR
     )
 
+    if not matches:
+        return {
+            "results": [],
+            "message": "This clip is Likely Not present in the database"
+        }
+
     return {"results": matches}
 
 
