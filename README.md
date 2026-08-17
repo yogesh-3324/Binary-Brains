@@ -38,8 +38,8 @@ The repository is structured as a multi-tier microservices application:
 
 ### 2. Video Duplicate & Sub-Clip Retrieval Service (`backend2/`)
 - **Frame Extraction**: Hardware-accelerated direct seeking via OpenCV (1 frame per 1.5s - 2.0s).
-- **Fingerprinting**: 64-bit frame pHash converted into 64-dim float vectors for Pinecone indexing.
-- **Vector DB**: Pinecone Vector Database (Cosine Similarity Metric, `video-search-index`).
+- **Stage 1 Retrieval (Coarse Filter)**: Fast bitwise Hamming distance computation on 64-bit perceptual keyframe hashes (pHash) to shortlist top candidate reference videos.
+- **Stage 2 Retrieval (Fine Vector Alignment)**: DINOv2 384-dim Vision Transformer embeddings queried against **Pinecone Vector Database** (filtered by Stage 1 candidates).
 - **Temporal Alignment**: Offset consensus binning to detect temporal alignment windows and sub-clip ranges within longer reference videos.
 - **API Port**: `8001`
 
@@ -72,11 +72,11 @@ SameShot/
 │   └── Dockerfile            # Container configuration for image backend
 │
 ├── backend2/                 # Video Duplicate & Sub-Clip Microservice
-│   ├── main.py               # Video index builder and vector store manager
-│   ├── search_video.py       # Frame matching, Pinecone vector query, and temporal consensus
+│   ├── main.py               # 2-Stage Video index builder and vector store manager
+│   ├── search_video.py       # 2-Stage Video retrieval (Stage 1 pHash + Stage 2 DINOv2 Pinecone)
 │   ├── server.py             # FastAPI endpoints for video pool upload, query, and analysis
 │   ├── pinecone_db.py        # Pinecone Vector Database integration for frame vectors
-│   ├── utils.py              # Frame extraction and pHash calculation utilities
+│   ├── utils.py              # Frame extraction, pHash calculation & Hamming distance matrix utilities
 │   └── Dockerfile            # Container configuration for video backend
 │
 ├── frontend/                 # React Web Application
@@ -108,23 +108,22 @@ graph TD
     F -- No --> H["No Duplicate Found"]
 ```
 
-### 2. Video Fingerprinting & Sub-Clip Retrieval Pipeline
+### 2. 2-Stage Video Duplicate & Sub-Clip Retrieval Pipeline
 
 ```mermaid
 graph TD
     A["Query Video Upload"] --> B["Hardware Seeking Frame Extraction (1.5s - 2.0s Interval)"]
-    B --> C["Keyframe Perceptual Hashing (64-bit DCT pHash)"]
-    C --> D["Conversion to 64-dim Float Vector"]
-    D --> E["Pinecone Vector DB Similarity Search"]
-    E --> F{"Similarity Match Threshold Passed?"}
-    F -- Yes --> G["Collect Matched Keyframe Pairs (Query Time t_q, Ref Time t_r)"]
-    F -- No --> H["Discard Non-Matching Keyframe"]
-    G --> I["Compute Temporal Offset (Delta t = t_r - t_q)"]
-    I --> J["Sliding Window Offset Consensus Binning (1.5s Tolerance)"]
-    J --> K["Extract Dominant Cluster & Compute Clip Coverage Ratio"]
-    K --> L{"Final Score >= 0.45 Threshold?"}
-    L -- Yes --> M["Output Sub-Clip Match with Timestamp Range & Confidence Score"]
-    L -- No --> N["No Sub-Clip Match Found"]
+    B --> C["Stage 1: Keyframe Perceptual Hashing (64-bit DCT pHash)"]
+    C --> D["Stage 1: Pairwise Hamming Distance Screening (<= 18 bits)"]
+    D --> E["Stage 1: Shortlist Top Candidate Reference Videos"]
+    E --> F["Stage 2: DINOv2 Feature Extraction (dinov2_vits14)"]
+    F --> G["Stage 2: Filtered Pinecone Vector Search on Candidates"]
+    G --> H["Stage 2: Compute Temporal Offset (Delta t = t_r - t_q)"]
+    H --> I["Stage 2: Sliding Window Offset Consensus Binning (1.5s Tolerance)"]
+    I --> J["Stage 2: Extract Dominant Cluster & Clip Coverage Ratio"]
+    J --> K{"Final Confidence Score >= 0.55 Threshold?"}
+    K -- Yes --> L["Output Sub-Clip Match with Timestamp Range & Confidence Score"]
+    K -- No --> M["No Sub-Clip Match Found"]
 ```
 
 ---
@@ -137,16 +136,21 @@ graph TD
 3. **Pinecone Indexing**: Normalized feature vectors are upserted into Pinecone Vector Database with associated image metadata and pHash.
 4. **Query & Scoring**: Cosine similarity is computed against indexed vectors in Pinecone. A configurable threshold (default `0.70`) identifies exact and modified duplicates.
 
-### Video Duplicate Detection & Sub-Clip Alignment
+### 2-Stage Video Duplicate Detection & Sub-Clip Alignment
 1. **Keyframe Extraction**: OpenCV extracts frames at fixed time intervals (default 1.5s to 2.0s) using direct frame position seeking.
-2. **Perceptual Vectorization**: Each keyframe is transformed into a 64-bit Discrete Cosine Transform (DCT) perceptual hash (`imagehash.phash`) and normalized into a 64-dim vector representation.
-3. **Pinecone Vector Search**: Frame embeddings are queried against Pinecone Vector Database (`video-search-index`) to retrieve top nearest neighbors by similarity.
+2. **Stage 1 (pHash Coarse Filtering)**:
+   - Computes 64-bit DCT perceptual hashes (`imagehash.phash`) for query keyframes.
+   - Evaluates fast bitwise Hamming distance matrix against stored reference keyframe hashes.
+   - Filters and selects top candidate reference videos with frame Hamming distance $\le 18$ bits out of 64.
+3. **Stage 2 (DINOv2 Fine Alignment & Pinecone Search)**:
+   - Computes 384-dimensional DINOv2 visual embeddings for query keyframes.
+   - Queries Pinecone Vector Database (`video-search-index`) applying a metadata filter restricted to Stage 1 candidate filenames.
 4. **Temporal Consensus Clustering**:
    - For each matching frame pair (Query timestamp $t_q$, Reference timestamp $t_r$), the temporal offset is computed: $\Delta t = t_r - t_q$.
    - Offsets are grouped into 1.5-second sliding tolerance windows.
    - The cluster with the highest density of consistent temporal offsets defines the aligned video clip match.
 5. **Scoring & Timestamp Range**: The final clip score combines normalized frame similarity and clip coverage:
-   $$\text{Final Score} = 0.6 \times \text{Average Cluster Score} + 0.4 \times \left(\frac{\text{Unique Matched Query Frames}}{\text{Total Query Frames}}\right)$$
+   $$\text{Final Score} = 0.7 \times \text{Average Cluster Score} + 0.3 \times \left(\frac{\text{Unique Matched Query Frames}}{\text{Total Query Frames}}\right)$$
 
 ---
 

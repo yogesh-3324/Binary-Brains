@@ -8,7 +8,10 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import numpy as np
-from pinecone_db import get_pinecone_video_store
+try:
+    from pinecone_db import get_pinecone_video_store
+except (ImportError, AttributeError):
+    from backend2.pinecone_db import get_pinecone_video_store
 import glob
 from utils import hash_frames, extract_frames_with_timestamps, embed_video_frames
 
@@ -32,14 +35,17 @@ def process_reference_pool(pool_dir: str):
     
     paths_path = os.path.join(STORE_DIR, "video_paths.npy")
     meta_path = os.path.join(STORE_DIR, "frame_meta.npy")
+    hashes_path = os.path.join(STORE_DIR, "frame_hashes.npy")
 
     # Load existing state
-    if os.path.exists(paths_path) and os.path.exists(meta_path):
+    if os.path.exists(paths_path) and os.path.exists(meta_path) and os.path.exists(hashes_path):
         video_paths = list(np.load(paths_path, allow_pickle=True))
         frame_meta = list(np.load(meta_path, allow_pickle=True))
+        frame_hashes = list(np.load(hashes_path, allow_pickle=True))
     else:
         video_paths = []
         frame_meta = []
+        frame_hashes = []
 
     # Filter out videos already in index
     existing_set = set(video_paths)
@@ -52,7 +58,7 @@ def process_reference_pool(pool_dir: str):
     total_new_frames = 0
     pinecone_video_store = get_pinecone_video_store()
 
-    print(f"Indexing {len(new_videos)} new videos with DINOv2 keyframe embeddings into Pinecone...")
+    print(f"Indexing {len(new_videos)} new videos with 2-Stage pHash + DINOv2 embeddings into Pinecone...")
 
     for path in new_videos:
         items = extract_frames_with_timestamps(path, sample_interval_sec=SAMPLE_INTERVAL_SEC)
@@ -67,21 +73,23 @@ def process_reference_pool(pool_dir: str):
         if dino_embeds.size == 0:
             continue
 
-        # 2. Compute pHashes for frame metadata
+        # 2. Compute pHashes for Stage 1 fast filtering & metadata
         phash_bytes = hash_frames(frames)
+        phash_hex = [str(h) for h in phash_bytes]
 
-        # Upsert 384-dim DINOv2 frame vectors to Pinecone
-        pinecone_video_store.upsert_frame_vectors_batch(path, items, dino_embeds)
+        # Upsert 384-dim DINOv2 frame vectors to Pinecone with pHash metadata
+        pinecone_video_store.upsert_frame_vectors_batch(path, items, dino_embeds, phash_list=phash_hex)
 
         added_paths.append(path)
         total_new_frames += len(items)
 
-        for it in items:
+        for i, it in enumerate(items):
             frame_meta.append({
                 "video": path,
                 "timestamp": it["timestamp"],
                 "frame_idx": it["frame_idx"]
             })
+            frame_hashes.append(phash_bytes[i])
 
     if not added_paths:
         return {"status": "ok", "count": len(video_paths), "newly_added": 0}
@@ -90,6 +98,7 @@ def process_reference_pool(pool_dir: str):
 
     np.save(paths_path, np.array(video_paths, dtype=object))
     np.save(meta_path, np.array(frame_meta, dtype=object))
+    np.save(hashes_path, np.array(frame_hashes, dtype=object))
 
     return {
         "status": "ok", 
@@ -104,6 +113,7 @@ def process_reference_pool(pool_dir: str):
 def remove_video_from_index(filename: str):
     paths_path = os.path.join(STORE_DIR, "video_paths.npy")
     meta_path = os.path.join(STORE_DIR, "frame_meta.npy")
+    hashes_path = os.path.join(STORE_DIR, "frame_hashes.npy")
 
     # Remove from Pinecone Video DB
     target_basename = os.path.basename(filename)
@@ -118,6 +128,7 @@ def remove_video_from_index(filename: str):
 
     video_paths = list(np.load(paths_path, allow_pickle=True))
     frame_meta = list(np.load(meta_path, allow_pickle=True))
+    frame_hashes = list(np.load(hashes_path, allow_pickle=True)) if os.path.exists(hashes_path) else []
 
     if target_basename not in [os.path.basename(p) for p in video_paths]:
         return False
@@ -135,12 +146,16 @@ def remove_video_from_index(filename: str):
     if not keep_indices or not new_video_paths:
         if os.path.exists(paths_path): os.remove(paths_path)
         if os.path.exists(meta_path): os.remove(meta_path)
+        if os.path.exists(hashes_path): os.remove(hashes_path)
         return True
 
     new_frame_meta = [frame_meta[i] for i in keep_indices]
+    new_frame_hashes = [frame_hashes[i] for i in keep_indices] if frame_hashes else []
 
     np.save(paths_path, np.array(new_video_paths, dtype=object))
     np.save(meta_path, np.array(new_frame_meta, dtype=object))
+    if new_frame_hashes:
+        np.save(hashes_path, np.array(new_frame_hashes, dtype=object))
 
     return True
 

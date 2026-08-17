@@ -8,14 +8,19 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import numpy as np
-from pinecone_db import get_pinecone_video_store
+try:
+    from pinecone_db import get_pinecone_video_store
+except (ImportError, AttributeError):
+    from backend2.pinecone_db import get_pinecone_video_store
 from collections import defaultdict
-from utils import extract_frames_with_timestamps, embed_video_frames
+from utils import extract_frames_with_timestamps, embed_video_frames, hash_frames, compute_hamming_matrix
 
 # =====================================================
 # CONFIG
 # =====================================================
 SAMPLE_FPS = 1
+PHASH_HAMMING_THRESHOLD = 18  # Maximum Hamming distance for Stage 1 pHash candidate match
+STAGE1_TOP_K_VIDEOS = 15      # Maximum top candidate videos selected from Stage 1
 FRAME_SCORE_THRESHOLD = 0.70  # Minimum DINOv2 visual similarity for keyframe match
 MATCH_SCORE_THRESHOLD = 0.55  # Minimum final confidence score for candidate clip match
 TOP_K_FRAME_NEIGHBORS = 5
@@ -27,11 +32,12 @@ def format_time(seconds: float) -> str:
     return f"{mins:02d}:{rem_secs:02d}"
 
 # =====================================================
-# SUB-CLIP TEMPORAL ALIGNMENT SEARCH LOGIC
+# 2-STAGE SUB-CLIP RETRIEVAL LOGIC
 # =====================================================
 def find_similar_videos(query_path: str, store_dir: str):
     paths_path = os.path.join(store_dir, "video_paths.npy")
     meta_path = os.path.join(store_dir, "frame_meta.npy")
+    hashes_path = os.path.join(store_dir, "frame_hashes.npy")
 
     # 1. Extract Query Frames & Timestamps (1 frame every 1.5 seconds)
     query_items = extract_frames_with_timestamps(query_path, sample_interval_sec=1.5)
@@ -41,22 +47,65 @@ def find_similar_videos(query_path: str, store_dir: str):
     frames = [it["frame"] for it in query_items]
     num_query_frames = len(frames)
 
-    # 2. Extract DINOv2 384-dim visual embeddings for query keyframes
+    # -----------------------------------------------------
+    # STAGE 1: pHash Coarse Filter
+    # -----------------------------------------------------
+    filter_dict = None
+    stage1_candidate_filenames = []
+
+    if os.path.exists(hashes_path) and os.path.exists(meta_path):
+        try:
+            query_hashes = hash_frames(frames)  # (N, 8) uint8
+            ref_hashes_list = np.load(hashes_path, allow_pickle=True)
+            frame_meta_list = np.load(meta_path, allow_pickle=True)
+
+            if len(ref_hashes_list) > 0 and len(ref_hashes_list) == len(frame_meta_list):
+                ref_hashes = np.vstack(ref_hashes_list).astype(np.uint8)  # (M, 8) uint8
+                
+                # Compute pairwise Hamming distance matrix (N, M)
+                dist_matrix = compute_hamming_matrix(query_hashes, ref_hashes)
+
+                video_match_counts = defaultdict(int)
+                for q_idx in range(len(query_hashes)):
+                    matched_indices = np.where(dist_matrix[q_idx] <= PHASH_HAMMING_THRESHOLD)[0]
+                    for ref_idx in matched_indices:
+                        meta = frame_meta_list[ref_idx]
+                        ref_fname = os.path.basename(meta["video"])
+                        video_match_counts[ref_fname] += 1
+
+                if video_match_counts:
+                    # Rank candidates by pHash keyframe match count
+                    sorted_candidates = sorted(video_match_counts.items(), key=lambda x: x[1], reverse=True)
+                    stage1_candidate_filenames = [fname for fname, _ in sorted_candidates[:STAGE1_TOP_K_VIDEOS]]
+                    print(f"[Stage 1: pHash Coarse Filter] Found {len(stage1_candidate_filenames)} candidate videos out of {len(set(os.path.basename(m['video']) for m in frame_meta_list))} total.")
+                    filter_dict = {"filename": {"$in": stage1_candidate_filenames}}
+                else:
+                    print("[Stage 1: pHash Coarse Filter] No candidates passed pHash threshold. Falling back to full search.")
+        except Exception as e:
+            print(f"Warning in Stage 1 pHash Coarse Filter: {e}")
+
+    # -----------------------------------------------------
+    # STAGE 2: DINOv2 Fine Alignment & Temporal Consensus
+    # -----------------------------------------------------
     query_embeds = embed_video_frames(frames)
     if query_embeds.size == 0:
         return []
 
-    # 3. Pinecone Video Search (Query each query frame against indexed reference keyframes)
     video_matches = defaultdict(list)
     try:
         pinecone_video_store = get_pinecone_video_store()
-        print("Querying Pinecone Video Database for DINOv2 keyframe visual matches...")
+        search_scope = f"filtered {len(stage1_candidate_filenames)} Stage-1 candidate(s)" if filter_dict else "all reference videos"
+        print(f"[Stage 2: DINOv2 Fine Alignment] Querying Pinecone for DINOv2 keyframe matches across {search_scope}...")
 
         for q_idx, q_item in enumerate(query_items):
             q_ts = q_item["timestamp"]
             q_embed = query_embeds[q_idx]
 
-            matches = pinecone_video_store.query_frame_vector(q_embed, top_k=TOP_K_FRAME_NEIGHBORS)
+            matches = pinecone_video_store.query_frame_vector(
+                q_embed,
+                top_k=TOP_K_FRAME_NEIGHBORS,
+                filter_dict=filter_dict
+            )
 
             for m in matches:
                 meta = m.get("metadata", {})
@@ -65,7 +114,6 @@ def find_similar_videos(query_path: str, store_dir: str):
                 score = float(m.get("score", 0.0))
                 offset = round(ref_ts - q_ts, 1)
 
-                # Strict frame similarity threshold
                 if ref_path and score >= FRAME_SCORE_THRESHOLD:
                     video_matches[ref_path].append({
                         "q_ts": q_ts,
@@ -75,44 +123,34 @@ def find_similar_videos(query_path: str, store_dir: str):
                     })
 
     except Exception as e:
-        print(f"Warning querying Pinecone for video search: {e}")
+        print(f"Warning querying Pinecone in Stage 2 fine search: {e}")
         return []
 
-    # 4. Temporal Offset Consensus Clustering per candidate video
+    # Temporal Offset Consensus Clustering per candidate video
     candidate_results = []
 
     for ref_path, matches in video_matches.items():
         if not matches:
             continue
 
-        # Bin offsets by 1.5 second tolerance windows to find the largest aligned cluster
         offset_clusters = defaultdict(list)
         for m in matches:
-            # Round offset to nearest 1.5s bin
             bin_key = round(m["offset"] / 1.5) * 1.5
             offset_clusters[bin_key].append(m)
 
-        # Pick the cluster with highest match count & cumulative score
         best_cluster = max(
             offset_clusters.values(),
             key=lambda cluster: (len({m["q_ts"] for m in cluster}), sum(m["score"] for m in cluster))
         )
 
-        # Unique query frames matched in best cluster
         unique_q_matched = len({m["q_ts"] for m in best_cluster})
         avg_cluster_score = sum(m["score"] for m in best_cluster) / len(best_cluster)
-        
-        # Coverage ratio of the query clip
         coverage = unique_q_matched / num_query_frames
 
-        # STRICT FALSE POSITIVE GUARD:
-        # If query has multiple frames (>= 3), require at least 2 distinct temporal keyframes matched!
-        # A single accidental 1-frame match in a multi-frame video will be rejected.
         if num_query_frames >= 3 and unique_q_matched < 2:
             print(f"Rejecting single-frame candidate match for {os.path.basename(ref_path)} (Matched {unique_q_matched}/{num_query_frames} frames)")
             continue
 
-        # Weighted final score combining keyframe cosine similarity (70%) and clip coverage (30%)
         final_score = (0.70 * avg_cluster_score) + (0.30 * coverage)
 
         if final_score < MATCH_SCORE_THRESHOLD:
@@ -135,7 +173,6 @@ def find_similar_videos(query_path: str, store_dir: str):
             "verdict": verdict
         })
 
-    # 5. Sort by final score descending
     candidate_results.sort(key=lambda x: x["hash_score"], reverse=True)
 
     for rank, res in enumerate(candidate_results[:5], 1):

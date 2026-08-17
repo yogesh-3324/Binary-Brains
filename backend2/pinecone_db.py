@@ -111,15 +111,18 @@ class PineconeVideoStore:
         print(f"[Pinecone Video] Upserted {len(records)} frame vectors into index '{self.index_name}'")
         return ids
 
-    def query_frame_vector(self, query_embed: np.ndarray, top_k: int = 10):
-        """Queries Pinecone for nearest DINOv2 keyframe embeddings."""
+    def query_frame_vector(self, query_embed: np.ndarray, top_k: int = 10, filter_dict: dict = None):
+        """Queries Pinecone for nearest DINOv2 keyframe embeddings with optional metadata filter."""
         idx = self.get_index()
         values = query_embed.tolist() if hasattr(query_embed, "tolist") else query_embed
-        response = idx.query(
-            vector=values,
-            top_k=top_k,
-            include_metadata=True
-        )
+        query_kwargs = {
+            "vector": values,
+            "top_k": top_k,
+            "include_metadata": True
+        }
+        if filter_dict:
+            query_kwargs["filter"] = filter_dict
+        response = idx.query(**query_kwargs)
         return response.get("matches", [])
 
     def delete_by_video_filename(self, filename: str):

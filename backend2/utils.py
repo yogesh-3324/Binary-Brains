@@ -80,12 +80,14 @@ def embed_video_frames(frames, batch_size=16):
     return np.vstack(embeddings).astype("float32")
 
 # ==========================================
-# PERCEPTUAL VIDEO HASHING
+# PERCEPTUAL VIDEO HASHING & FAST HAMMING DISTANCE
 # ==========================================
+BIT_COUNT_TABLE = np.array([bin(i).count('1') for i in range(256)], dtype=np.int32)
+
 def hash_frames(frames):
     """
     Computes a 64-bit phash for each frame.
-    Returns a numpy array of uint8, shape (N, 8) suitable for faiss.IndexBinaryFlat.
+    Returns a numpy array of uint8, shape (N, 8) suitable for fast Hamming search.
     """
     if not frames:
         return np.empty((0, 8), dtype=np.uint8)
@@ -101,6 +103,31 @@ def hash_frames(frames):
         hashed_bytes.append(packed)
     
     return np.vstack(hashed_bytes).astype(np.uint8)
+
+def hash_frames_hex(frames):
+    """
+    Computes pHash string representation for a list of RGB frames.
+    """
+    hex_list = []
+    for f in frames:
+        pil_img = Image.fromarray(f)
+        h = imagehash.phash(pil_img, hash_size=8)
+        hex_list.append(str(h))
+    return hex_list
+
+def compute_hamming_matrix(query_bytes: np.ndarray, ref_bytes: np.ndarray) -> np.ndarray:
+    """
+    Computes pairwise Hamming distance matrix between N query hashes and M reference hashes.
+    query_bytes: shape (N, 8) uint8
+    ref_bytes: shape (M, 8) uint8
+    Returns: shape (N, M) int32 matrix of Hamming distances (0 to 64).
+    """
+    if query_bytes.size == 0 or ref_bytes.size == 0:
+        return np.empty((len(query_bytes), len(ref_bytes)), dtype=np.int32)
+
+    xor_res = np.bitwise_xor(query_bytes[:, None, :], ref_bytes[None, :, :])
+    dist = BIT_COUNT_TABLE[xor_res].sum(axis=2)
+    return dist
 
 # ==========================================
 # ULTRA-FAST DIRECT SEEKING FRAME EXTRACTOR
