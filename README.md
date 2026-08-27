@@ -30,10 +30,12 @@ The repository is structured as a multi-tier microservices application:
 ```
 
 ### 1. Image Duplicate Detection Service (`backend/`)
-- **Model**: DINOv2 (`dinov2_vits14`) self-supervised Vision Transformer.
+- **Model**: DINOv2 (`dinov2_vits14`) self-supervised Vision Transformer with Grayscale preprocessing (color-blind feature extraction).
 - **Embedding Dimensionality**: 384 dimensions (L2-normalized).
+- **Multi-Rotation Querying**: 4 rotation embeddings (0°, 90°, 180°, 270°) per query image for full rotation invariance.
 - **Vector DB**: Pinecone Vector Database (Cosine Similarity Metric, `image-search-index`).
-- **Fallback / Hybrid Engine**: Perceptual Hash (pHash) filtering via `imagehash`.
+- **Secondary Verification Engine**: OpenCV SIFT keypoint matching & RANSAC Homography (`cropfinds`) for sub-region / crop detection.
+- **Fallback Engine**: 64-bit Grayscale Perceptual Hash (pHash) filtering via `imagehash`.
 - **API Port**: `8000`
 
 ### 2. Video Duplicate & Sub-Clip Retrieval Service (`backend2/`)
@@ -99,13 +101,16 @@ SameShot/
 
 ```mermaid
 graph TD
-    A["Query Image Upload"] --> B["Image Preprocessing & Resizing (224x224)"]
-    B --> C["DINOv2 Feature Extraction (dinov2_vits14)"]
-    C --> D["384-dimensional Vector Normalization (L2)"]
-    D --> E["Pinecone Vector Database Cosine Search"]
-    E --> F{"Cosine Similarity >= 0.70 Threshold?"}
-    F -- Yes --> G["Flag as Duplicate / Modified Image Match"]
-    F -- No --> H["No Duplicate Found"]
+    A["Query Image Upload"] --> B["Grayscale Preprocessing & 4-Rotation Generator (0°, 90°, 180°, 270°)"]
+    B --> C["DINOv2 Feature Extraction (dinov2_vits14, 384-dim)"]
+    C --> D["Pinecone Vector Database Cosine Search (top_k=10)"]
+    D --> E{"Cosine Score Classification"}
+    E -- "Score >= 0.95" --> F["Flag as Exactly Same"]
+    E -- "Score >= 0.70" --> G["Flag as Near Duplicate"]
+    E -- "0.40 <= Score < 0.88" --> H["Trigger SIFT Keypoint & RANSAC Homography (cropfinds)"]
+    H -- "Inliers >= 8" --> I["Flag as Cropped / Sub-Region Match"]
+    H -- "Inliers < 8" --> J["Different / No Match"]
+    E -- "Score < 0.40" --> J
 ```
 
 ### 2. 2-Stage Video Duplicate & Sub-Clip Retrieval Pipeline
@@ -131,10 +136,11 @@ graph TD
 ## How It Works: Algorithms and Techniques
 
 ### Image Duplicate Detection Pipeline
-1. **Preprocessing**: Images are converted to RGB, resized to 224x224, and normalized using ImageNet statistics.
-2. **Feature Extraction**: Passed through `dinov2_vits14` to produce a 384-dimensional feature vector.
-3. **Pinecone Indexing**: Normalized feature vectors are upserted into Pinecone Vector Database with associated image metadata and pHash.
-4. **Query & Scoring**: Cosine similarity is computed against indexed vectors in Pinecone. A configurable threshold (default `0.70`) identifies exact and modified duplicates.
+1. **Color-Blind Preprocessing**: Images are converted to 3-channel Grayscale (`T.Grayscale(num_output_channels=3)`), resized to 224x224, and normalized using ImageNet statistics. This eliminates color variance so light/dark mode UI screenshots or color adjustments match accurately.
+2. **Multi-Rotation Query Embeddings**: Generates 4 vector embeddings per query image (0°, 90°, 180°, 270°) via `dinov2_vits14` to achieve full rotation-invariant search.
+3. **Pinecone Vector Search & Thresholding**: 384-dimensional L2-normalized vectors are indexed and queried in Pinecone Vector Database (`top_k=10`). Similarity scores are classified into **"Exactly Same"** (≥ 0.95), **"Near Duplicate"** (≥ 0.70), or **"Different"** (< 0.70).
+4. **SIFT & RANSAC Homography Crop Detection**: For moderate similarity scores (0.40 ≤ Score < 0.88), OpenCV SIFT keypoint feature extraction and RANSAC Homography matrix estimation (`cropfinds`) run on candidate pairs. If inliers ≥ 8, the match is verified as a cropped or sub-region duplicate.
+5. **Local pHash Fallback Engine**: If Pinecone cloud search is unavailable, a local fallback evaluates 64-bit grayscale perceptual hashes (`imagehash.phash`) using a Hamming distance threshold ≤ 12.
 
 ### 2-Stage Video Duplicate Detection & Sub-Clip Alignment
 1. **Keyframe Extraction**: OpenCV extracts frames at fixed time intervals (default 1.5s to 2.0s) using direct frame position seeking.
